@@ -493,7 +493,7 @@ function printTree(nodes: TreeNode[], prefix: string = '', isLast: boolean[] = [
     const coloredSize = colorSize(node.size, sizeStr)
 
     console.log(
-      `${linePrefix}${connector}${chalk.white(node.name)}${chalk.gray('@' + node.version)} ${coloredSize}`
+      `${linePrefix}${chalk.gray(connector)}${chalk.bold.white(node.name)}${chalk.cyan('@' + node.version)} ${coloredSize}`
     )
 
     if (node.children.length > 0) {
@@ -695,8 +695,8 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
       const typeIcon = dep.type === 'prod' ? chalk.green(figures.circleFilled) : chalk.blue(figures.circleFilled)
       table.push([
         typeIcon,
-        chalk.yellow(dep.name),
-        chalk.gray(dep.version),
+        chalk.bold.yellow(dep.name),
+        chalk.cyan(dep.version),
         colorSize(dep.size, formatSize(dep.size)),
       ])
     }
@@ -801,10 +801,10 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
     for (const dup of dups.slice(0, top)) {
       const versionsStr = dup.versions
-        .map(v => `${v.version} ${chalk.gray(`(${formatSize(v.size)})`)}`)
+        .map(v => `${chalk.cyan(v.version)} ${chalk.gray(`(${formatSize(v.size)})`)}`)
         .join(chalk.gray(' | '))
       table.push([
-        chalk.yellow(dup.name),
+        chalk.bold.yellow(dup.name),
         versionsStr,
         colorSize(dup.totalSize, formatSize(dup.totalSize)),
       ])
@@ -907,10 +907,11 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
   for (const pkg of topPackages) {
     const sizeStr = formatSize(pkg.size)
+    const displayName = pkg.name.length > 32 ? pkg.name.slice(0, 29) + '...' : pkg.name
     table.push([
       getTypeIcon(pkg.type),
-      chalk.white(pkg.name.length > 32 ? pkg.name.slice(0, 29) + '...' : pkg.name),
-      chalk.gray(pkg.version),
+      chalk.bold.white(displayName),
+      chalk.cyan(pkg.version),
       colorSize(pkg.size, sizeStr.padStart(10)),
       createBar(pkg.size / maxSize),
     ])
