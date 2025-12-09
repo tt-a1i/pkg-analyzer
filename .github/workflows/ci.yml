@@ -71,7 +71,7 @@ jobs:
         id: version
         run: |
           CURRENT_VERSION=$(node -p "require('./package.json').version")
-          NPM_VERSION=$(npm view pkg-analyzer version 2>/dev/null || echo "0.0.0")
+          NPM_VERSION=$(npm view @tt-a1i/pkg-analyzer version 2>/dev/null || echo "0.0.0")
           if [ "$CURRENT_VERSION" != "$NPM_VERSION" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "Version changed from $NPM_VERSION to $CURRENT_VERSION"
@@ -82,6 +82,6 @@ jobs:
 
       - name: Publish to npm
         if: steps.version.outputs.changed == 'true'
-        run: npm publish
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

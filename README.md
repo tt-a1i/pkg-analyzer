@@ -1,6 +1,6 @@
 # pkg-analyzer
 
-[![npm version](https://img.shields.io/npm/v/pkg-analyzer.svg)](https://www.npmjs.com/package/pkg-analyzer)
+[![npm version](https://img.shields.io/npm/v/@tt-a1i/pkg-analyzer.svg)](https://www.npmjs.com/package/@tt-a1i/pkg-analyzer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A powerful CLI tool to analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, and export reports for AI-powered optimization suggestions.
@@ -20,13 +20,16 @@ A powerful CLI tool to analyze node_modules dependencies - visualize sizes, find
 
 ```bash
 # npm
-npm install -g pkg-analyzer
+npm install -g @tt-a1i/pkg-analyzer
 
 # pnpm
-pnpm add -g pkg-analyzer
+pnpm add -g @tt-a1i/pkg-analyzer
 
 # yarn
-yarn global add pkg-analyzer
+yarn global add @tt-a1i/pkg-analyzer
+
+# Or use npx directly (no install required)
+npx @tt-a1i/pkg-analyzer
 ```
 
 ## Quick Start
@@ -185,7 +188,7 @@ The exported Markdown includes:
 ## Programmatic API
 
 ```typescript
-import { analyze } from 'pkg-analyzer'
+import { analyze } from '@tt-a1i/pkg-analyzer'
 
 await analyze('/path/to/project', {
   top: 20,
