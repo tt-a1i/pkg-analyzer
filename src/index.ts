@@ -1,17 +1,53 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import chalk from 'chalk'
+import ora from 'ora'
+import Table from 'cli-table3'
 import YAML from 'yaml'
 
 interface PackageInfo {
   name: string
   version: string
   size: number
+  type: 'prod' | 'dev' | 'peer' | 'optional' | 'transitive'
+}
+
+interface DuplicateInfo {
+  name: string
+  versions: { version: string; size: number }[]
+  totalSize: number
 }
 
 interface AnalyzeOptions {
   top?: number
+  type?: 'prod' | 'dev' | 'transitive' | 'all'
+  sort?: 'size' | 'name' | 'type'
+  duplicates?: boolean
+  tree?: string | boolean
+  depth?: number
+  unused?: boolean
   json?: boolean
+}
+
+interface UnusedDep {
+  name: string
+  version: string
+  size: number
+  type: 'prod' | 'dev'
+}
+
+interface TreeNode {
+  name: string
+  version: string
+  size: number
+  children: TreeNode[]
+}
+
+interface ProjectDeps {
+  prod: Set<string>
+  dev: Set<string>
+  peer: Set<string>
+  optional: Set<string>
 }
 
 /**
@@ -49,77 +85,126 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * Create a progress bar
+ * Color code size based on magnitude
+ */
+function colorSize(bytes: number, formatted: string): string {
+  if (bytes > 5 * 1024 * 1024) return chalk.red(formatted)
+  if (bytes > 1 * 1024 * 1024) return chalk.yellow(formatted)
+  if (bytes > 100 * 1024) return chalk.white(formatted)
+  return chalk.green(formatted)
+}
+
+/**
+ * Create a progress bar with gradient colors
  */
 function createBar(ratio: number, width: number = 20): string {
   const filled = Math.round(ratio * width)
   const empty = width - filled
-  return chalk.cyan('█'.repeat(filled)) + chalk.gray('░'.repeat(empty))
+
+  let bar = ''
+  for (let i = 0; i < filled; i++) {
+    const pos = i / width
+    if (pos > 0.7) bar += chalk.red('█')
+    else if (pos > 0.4) bar += chalk.yellow('█')
+    else bar += chalk.green('█')
+  }
+  bar += chalk.gray('░'.repeat(empty))
+
+  return bar
 }
 
 /**
- * Parse pnpm-lock.yaml to get dependencies
+ * Get package type icon
  */
-function parsePnpmLock(projectPath: string): string[] {
-  const lockPath = path.join(projectPath, 'pnpm-lock.yaml')
+function getTypeIcon(type: PackageInfo['type']): string {
+  switch (type) {
+    case 'prod': return chalk.green('●')
+    case 'dev': return chalk.blue('●')
+    case 'peer': return chalk.magenta('●')
+    case 'optional': return chalk.yellow('●')
+    case 'transitive': return chalk.gray('○')
+  }
+}
 
-  if (!fs.existsSync(lockPath)) {
-    return []
+/**
+ * Read project's direct dependencies from package.json
+ */
+function getProjectDeps(projectPath: string): ProjectDeps {
+  const pkgJsonPath = path.join(projectPath, 'package.json')
+  const deps: ProjectDeps = {
+    prod: new Set(),
+    dev: new Set(),
+    peer: new Set(),
+    optional: new Set(),
   }
 
-  const content = fs.readFileSync(lockPath, 'utf-8')
-  const lock = YAML.parse(content)
+  if (!fs.existsSync(pkgJsonPath)) return deps
 
-  const deps: string[] = []
+  try {
+    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
 
-  // pnpm-lock.yaml v6+ format
-  if (lock.packages) {
-    for (const key of Object.keys(lock.packages)) {
-      // Format: /package-name@version or @scope/package-name@version
-      const match = key.match(/^\/?(@?[^@]+)@/)
-      if (match) {
-        deps.push(match[1])
-      }
+    if (pkgJson.dependencies) {
+      Object.keys(pkgJson.dependencies).forEach(d => deps.prod.add(d))
     }
+    if (pkgJson.devDependencies) {
+      Object.keys(pkgJson.devDependencies).forEach(d => deps.dev.add(d))
+    }
+    if (pkgJson.peerDependencies) {
+      Object.keys(pkgJson.peerDependencies).forEach(d => deps.peer.add(d))
+    }
+    if (pkgJson.optionalDependencies) {
+      Object.keys(pkgJson.optionalDependencies).forEach(d => deps.optional.add(d))
+    }
+  } catch {
+    // Ignore errors
   }
 
-  return [...new Set(deps)]
+  return deps
+}
+
+/**
+ * Determine package type
+ */
+function getPackageType(name: string, deps: ProjectDeps): PackageInfo['type'] {
+  if (deps.prod.has(name)) return 'prod'
+  if (deps.dev.has(name)) return 'dev'
+  if (deps.peer.has(name)) return 'peer'
+  if (deps.optional.has(name)) return 'optional'
+  return 'transitive'
 }
 
 /**
  * Get all packages from node_modules (supports pnpm)
  */
-function getPackagesFromNodeModules(projectPath: string): PackageInfo[] {
+function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spinner: ReturnType<typeof ora>): PackageInfo[] {
   const nodeModulesPath = path.join(projectPath, 'node_modules')
 
   if (!fs.existsSync(nodeModulesPath)) {
-    console.error(chalk.red('Error: node_modules not found. Run pnpm install first.'))
+    spinner.fail('node_modules not found. Run pnpm install first.')
     process.exit(1)
   }
 
   const packages: PackageInfo[] = []
 
-  // Check if it's pnpm (has .pnpm directory)
   const pnpmPath = path.join(nodeModulesPath, '.pnpm')
   const isPnpm = fs.existsSync(pnpmPath)
 
   if (isPnpm) {
-    // pnpm: scan .pnpm directory
     const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
+    const total = entries.length
+    let processed = 0
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
 
-      // Format: package-name@version or @scope+package-name@version
-      const dirName = entry.name
+      processed++
+      spinner.text = `Scanning packages... ${processed}/${total}`
 
-      // Parse package name from directory name
-      // Examples: chalk@5.6.2, @types+node@20.19.26
+      const dirName = entry.name
       let name: string
       let atIndex: number
 
       if (dirName.startsWith('@')) {
-        // Scoped package: @scope+name@version
         const plusIndex = dirName.indexOf('+')
         if (plusIndex === -1) continue
 
@@ -130,23 +215,20 @@ function getPackagesFromNodeModules(projectPath: string): PackageInfo[] {
         const pkgName = dirName.substring(plusIndex + 1, atIndex)
         name = `${scope}/${pkgName}`
       } else {
-        // Regular package: name@version
         atIndex = dirName.lastIndexOf('@')
         if (atIndex <= 0) continue
 
         name = dirName.substring(0, atIndex)
       }
 
-      // The actual package is in node_modules inside the .pnpm dir
       const pkgPath = path.join(pnpmPath, dirName, 'node_modules', name)
 
       if (fs.existsSync(pkgPath)) {
-        const info = getPackageInfo(pkgPath, name)
+        const info = getPackageInfo(pkgPath, name, deps)
         if (info) packages.push(info)
       }
     }
   } else {
-    // npm/yarn: scan node_modules directly
     const entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true })
 
     for (const entry of entries) {
@@ -154,7 +236,6 @@ function getPackagesFromNodeModules(projectPath: string): PackageInfo[] {
 
       const pkgPath = path.join(nodeModulesPath, entry.name)
 
-      // Handle scoped packages (@scope/package)
       if (entry.name.startsWith('@')) {
         const scopedEntries = fs.readdirSync(pkgPath, { withFileTypes: true })
 
@@ -163,11 +244,11 @@ function getPackagesFromNodeModules(projectPath: string): PackageInfo[] {
 
           const scopedPkgPath = path.join(pkgPath, scopedEntry.name)
           const name = `${entry.name}/${scopedEntry.name}`
-          const info = getPackageInfo(scopedPkgPath, name)
+          const info = getPackageInfo(scopedPkgPath, name, deps)
           if (info) packages.push(info)
         }
       } else {
-        const info = getPackageInfo(pkgPath, entry.name)
+        const info = getPackageInfo(pkgPath, entry.name, deps)
         if (info) packages.push(info)
       }
     }
@@ -179,7 +260,7 @@ function getPackagesFromNodeModules(projectPath: string): PackageInfo[] {
 /**
  * Get package info
  */
-function getPackageInfo(pkgPath: string, name: string): PackageInfo | null {
+function getPackageInfo(pkgPath: string, name: string, deps: ProjectDeps): PackageInfo | null {
   const pkgJsonPath = path.join(pkgPath, 'package.json')
 
   if (!fs.existsSync(pkgJsonPath)) return null
@@ -192,6 +273,7 @@ function getPackageInfo(pkgPath: string, name: string): PackageInfo | null {
       name,
       version: pkgJson.version || 'unknown',
       size,
+      type: getPackageType(name, deps),
     }
   } catch {
     return null
@@ -199,58 +281,617 @@ function getPackageInfo(pkgPath: string, name: string): PackageInfo | null {
 }
 
 /**
+ * Find duplicate packages (multiple versions)
+ */
+function findDuplicates(packages: PackageInfo[]): DuplicateInfo[] {
+  const byName = new Map<string, PackageInfo[]>()
+
+  for (const pkg of packages) {
+    const existing = byName.get(pkg.name) || []
+    existing.push(pkg)
+    byName.set(pkg.name, existing)
+  }
+
+  const duplicates: DuplicateInfo[] = []
+
+  for (const [name, pkgs] of byName) {
+    if (pkgs.length > 1) {
+      const versions = pkgs.map(p => ({ version: p.version, size: p.size }))
+      const totalSize = pkgs.reduce((sum, p) => sum + p.size, 0)
+      duplicates.push({ name, versions, totalSize })
+    }
+  }
+
+  return duplicates.sort((a, b) => b.totalSize - a.totalSize)
+}
+
+/**
+ * Sort packages
+ */
+function sortPackages(packages: PackageInfo[], sortBy: 'size' | 'name' | 'type'): PackageInfo[] {
+  const typeOrder = { prod: 0, dev: 1, peer: 2, optional: 3, transitive: 4 }
+
+  return [...packages].sort((a, b) => {
+    switch (sortBy) {
+      case 'size':
+        return b.size - a.size
+      case 'name':
+        return a.name.localeCompare(b.name)
+      case 'type':
+        return typeOrder[a.type] - typeOrder[b.type] || b.size - a.size
+    }
+  })
+}
+
+/**
+ * Filter packages by type
+ */
+function filterPackages(packages: PackageInfo[], type: 'prod' | 'dev' | 'transitive' | 'all'): PackageInfo[] {
+  if (type === 'all') return packages
+  return packages.filter(p => p.type === type)
+}
+
+/**
+ * Get dependencies of a package from its package.json
+ */
+function getPackageDeps(pkgPath: string): string[] {
+  const pkgJsonPath = path.join(pkgPath, 'package.json')
+  if (!fs.existsSync(pkgJsonPath)) return []
+
+  try {
+    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+    return Object.keys(pkgJson.dependencies || {})
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Build dependency tree
+ */
+function buildTree(
+  projectPath: string,
+  packageName: string | null,
+  packages: PackageInfo[],
+  maxDepth: number
+): TreeNode[] {
+  const nodeModulesPath = path.join(projectPath, 'node_modules')
+  const pnpmPath = path.join(nodeModulesPath, '.pnpm')
+  const isPnpm = fs.existsSync(pnpmPath)
+
+  const packageMap = new Map<string, PackageInfo>()
+  for (const pkg of packages) {
+    packageMap.set(pkg.name, pkg)
+  }
+
+  function findPkgPath(name: string): string | null {
+    if (isPnpm) {
+      const entries = fs.readdirSync(pnpmPath)
+      for (const entry of entries) {
+        let pkgName: string
+        if (entry.startsWith('@')) {
+          const plusIndex = entry.indexOf('+')
+          const atIndex = entry.indexOf('@', plusIndex)
+          if (plusIndex === -1 || atIndex === -1) continue
+          pkgName = `${entry.substring(0, plusIndex)}/${entry.substring(plusIndex + 1, atIndex)}`
+        } else {
+          const atIndex = entry.lastIndexOf('@')
+          if (atIndex <= 0) continue
+          pkgName = entry.substring(0, atIndex)
+        }
+        if (pkgName === name) {
+          return path.join(pnpmPath, entry, 'node_modules', name)
+        }
+      }
+    } else {
+      const pkgPath = path.join(nodeModulesPath, name)
+      if (fs.existsSync(pkgPath)) return pkgPath
+    }
+    return null
+  }
+
+  function buildNode(name: string, depth: number, visited: Set<string>): TreeNode | null {
+    if (depth > maxDepth || visited.has(name)) return null
+
+    const pkg = packageMap.get(name)
+    if (!pkg) return null
+
+    const pkgPath = findPkgPath(name)
+    if (!pkgPath) return null
+
+    visited.add(name)
+    const deps = getPackageDeps(pkgPath)
+
+    const children: TreeNode[] = []
+    for (const dep of deps) {
+      const child = buildNode(dep, depth + 1, new Set(visited))
+      if (child) children.push(child)
+    }
+
+    children.sort((a, b) => b.size - a.size)
+
+    return {
+      name: pkg.name,
+      version: pkg.version,
+      size: pkg.size,
+      children,
+    }
+  }
+
+  if (packageName) {
+    const node = buildNode(packageName, 0, new Set())
+    return node ? [node] : []
+  }
+
+  // Build tree from project's direct dependencies
+  const pkgJsonPath = path.join(projectPath, 'package.json')
+  if (!fs.existsSync(pkgJsonPath)) return []
+
+  const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+  const directDeps = [
+    ...Object.keys(pkgJson.dependencies || {}),
+    ...Object.keys(pkgJson.devDependencies || {}),
+  ]
+
+  const roots: TreeNode[] = []
+  for (const dep of directDeps) {
+    const node = buildNode(dep, 0, new Set())
+    if (node) roots.push(node)
+  }
+
+  return roots.sort((a, b) => b.size - a.size)
+}
+
+/**
+ * Print dependency tree
+ */
+function printTree(nodes: TreeNode[], prefix: string = '', isLast: boolean[] = []): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i]
+    const isLastNode = i === nodes.length - 1
+
+    let linePrefix = ''
+    for (let j = 0; j < isLast.length; j++) {
+      linePrefix += isLast[j] ? '    ' : '│   '
+    }
+
+    const connector = isLastNode ? '└── ' : '├── '
+    const sizeStr = formatSize(node.size)
+    const coloredSize = colorSize(node.size, sizeStr)
+
+    console.log(
+      `${linePrefix}${connector}${chalk.white(node.name)}${chalk.gray('@' + node.version)} ${coloredSize}`
+    )
+
+    if (node.children.length > 0) {
+      printTree(node.children, '', [...isLast, isLastNode])
+    }
+  }
+}
+
+/**
+ * Scan source files for import/require statements
+ */
+function scanImports(projectPath: string): Set<string> {
+  const imports = new Set<string>()
+
+  const sourceExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.vue', '.svelte']
+  const ignoreDirs = ['node_modules', '.git', 'dist', 'build', 'coverage', '.next', '.nuxt']
+
+  function scanDir(dir: string) {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name)
+
+        if (entry.isDirectory()) {
+          if (!ignoreDirs.includes(entry.name)) {
+            scanDir(fullPath)
+          }
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name)
+          if (sourceExtensions.includes(ext)) {
+            scanFile(fullPath)
+          }
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  function scanFile(filePath: string) {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8')
+
+      // Match import statements: import x from 'package' or import 'package'
+      const importRegex = /(?:import\s+(?:[\w{},*\s]+\s+from\s+)?['"]([^'"./][^'"]*)['"'])|(?:require\s*\(\s*['"]([^'"./][^'"]*)['"]\s*\))/g
+
+      let match
+      while ((match = importRegex.exec(content)) !== null) {
+        const pkg = match[1] || match[2]
+        if (pkg) {
+          // Extract package name (handle scoped packages)
+          const parts = pkg.split('/')
+          if (pkg.startsWith('@') && parts.length >= 2) {
+            imports.add(`${parts[0]}/${parts[1]}`)
+          } else {
+            imports.add(parts[0])
+          }
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  scanDir(projectPath)
+  return imports
+}
+
+/**
+ * Find unused dependencies
+ */
+function findUnused(
+  projectPath: string,
+  packages: PackageInfo[],
+  projectDeps: ProjectDeps
+): UnusedDep[] {
+  const usedImports = scanImports(projectPath)
+  const unused: UnusedDep[] = []
+
+  // Check prod dependencies
+  for (const depName of projectDeps.prod) {
+    if (!usedImports.has(depName)) {
+      const pkg = packages.find(p => p.name === depName)
+      if (pkg) {
+        unused.push({
+          name: depName,
+          version: pkg.version,
+          size: pkg.size,
+          type: 'prod',
+        })
+      }
+    }
+  }
+
+  // Check dev dependencies (only check for common dev tool usage patterns)
+  const devToolPatterns = [
+    // Build tools often referenced in config files
+    'typescript', 'tsup', 'esbuild', 'webpack', 'rollup', 'vite', 'parcel',
+    // Test tools
+    'jest', 'vitest', 'mocha', 'chai', 'ava',
+    // Linters/formatters
+    'eslint', 'prettier', 'stylelint',
+    // Type definitions
+    '@types/',
+  ]
+
+  for (const depName of projectDeps.dev) {
+    // Skip common dev tools that may not be directly imported
+    const isDevTool = devToolPatterns.some(pattern =>
+      depName.startsWith(pattern) || depName === pattern
+    )
+    if (isDevTool) continue
+
+    if (!usedImports.has(depName)) {
+      const pkg = packages.find(p => p.name === depName)
+      if (pkg) {
+        unused.push({
+          name: depName,
+          version: pkg.version,
+          size: pkg.size,
+          type: 'dev',
+        })
+      }
+    }
+  }
+
+  return unused.sort((a, b) => b.size - a.size)
+}
+
+/**
  * Main analyze function
  */
 export async function analyze(projectPath: string = '.', options: AnalyzeOptions = {}) {
-  const { top = 10, json = false } = options
+  const {
+    top = 10,
+    type = 'all',
+    sort = 'size',
+    duplicates = false,
+    tree = false,
+    depth = 3,
+    unused = false,
+    json = false
+  } = options
   const resolvedPath = path.resolve(projectPath)
 
-  console.log(chalk.blue(`\nAnalyzing: ${resolvedPath}\n`))
+  const spinner = ora({
+    text: 'Scanning packages...',
+    spinner: 'dots',
+  }).start()
 
-  // Get packages
-  const packages = getPackagesFromNodeModules(resolvedPath)
+  const deps = getProjectDeps(resolvedPath)
+  let packages = getPackagesFromNodeModules(resolvedPath, deps, spinner)
 
   if (packages.length === 0) {
-    console.log(chalk.yellow('No packages found.'))
+    spinner.warn('No packages found.')
     return
   }
 
-  // Sort by size
-  packages.sort((a, b) => b.size - a.size)
+  // Handle unused mode
+  if (unused) {
+    spinner.text = 'Scanning source files...'
+    const unusedDeps = findUnused(resolvedPath, packages, deps)
+    spinner.succeed(`Scanned project for unused dependencies`)
 
-  // Calculate total
+    if (json) {
+      console.log(JSON.stringify({ unused: unusedDeps }, null, 2))
+      return
+    }
+
+    if (unusedDeps.length === 0) {
+      console.log(chalk.green('\n  No unused dependencies found!\n'))
+      return
+    }
+
+    console.log()
+    console.log(chalk.bold('🔍 Potentially Unused Dependencies'))
+    console.log(chalk.gray(`   ${resolvedPath}`))
+    console.log()
+
+    const table = new Table({
+      head: [
+        chalk.gray('Type'),
+        chalk.gray('Package'),
+        chalk.gray('Version'),
+        chalk.gray('Size'),
+      ],
+      chars: {
+        'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
+        'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
+        'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
+        'right': '', 'right-mid': '', 'middle': ' ',
+      },
+      style: { 'padding-left': 1, 'padding-right': 1 },
+    })
+
+    for (const dep of unusedDeps) {
+      const typeIcon = dep.type === 'prod' ? chalk.green('●') : chalk.blue('●')
+      table.push([
+        typeIcon,
+        chalk.yellow(dep.name),
+        chalk.gray(dep.version),
+        colorSize(dep.size, formatSize(dep.size)),
+      ])
+    }
+
+    console.log(table.toString())
+
+    const totalUnusedSize = unusedDeps.reduce((sum, d) => sum + d.size, 0)
+    const prodUnused = unusedDeps.filter(d => d.type === 'prod')
+    const devUnused = unusedDeps.filter(d => d.type === 'dev')
+
+    console.log()
+    console.log(chalk.gray('─'.repeat(60)))
+    console.log()
+    console.log(chalk.bold('   Summary:'))
+    console.log(`     ${chalk.yellow('⚠')} ${unusedDeps.length} potentially unused dependencies`)
+    if (prodUnused.length > 0) {
+      console.log(`     ${chalk.green('●')} ${prodUnused.length} production deps (${formatSize(prodUnused.reduce((s, d) => s + d.size, 0))})`)
+    }
+    if (devUnused.length > 0) {
+      console.log(`     ${chalk.blue('●')} ${devUnused.length} dev deps (${formatSize(devUnused.reduce((s, d) => s + d.size, 0))})`)
+    }
+    console.log(`     ${chalk.red('✗')} Potential savings: ${chalk.red(formatSize(totalUnusedSize))}`)
+    console.log()
+    console.log(chalk.gray('   Note: This is a static analysis. Some dependencies may be'))
+    console.log(chalk.gray('   used dynamically or in config files. Verify before removing.'))
+    console.log()
+    return
+  }
+
+  // Handle tree mode
+  if (tree) {
+    const packageName = typeof tree === 'string' ? tree : null
+    spinner.succeed(`Found ${packages.length} packages`)
+
+    const treeNodes = buildTree(resolvedPath, packageName, packages, depth)
+
+    if (json) {
+      console.log(JSON.stringify({ tree: treeNodes }, null, 2))
+      return
+    }
+
+    if (treeNodes.length === 0) {
+      console.log(chalk.yellow(`\n  ${packageName ? `Package "${packageName}" not found` : 'No dependencies found'}\n`))
+      return
+    }
+
+    console.log()
+    console.log(chalk.bold('🌳 Dependency Tree'))
+    console.log(chalk.gray(`   ${resolvedPath}`))
+    if (packageName) {
+      console.log(chalk.cyan(`   Package: ${packageName}`))
+    }
+    console.log(chalk.gray(`   Max depth: ${depth}`))
+    console.log()
+
+    printTree(treeNodes)
+    console.log()
+    return
+  }
+
+  // Handle duplicates mode
+  if (duplicates) {
+    const dups = findDuplicates(packages)
+    spinner.succeed(`Found ${packages.length} packages, ${dups.length} with multiple versions`)
+
+    if (json) {
+      console.log(JSON.stringify({ duplicates: dups }, null, 2))
+      return
+    }
+
+    if (dups.length === 0) {
+      console.log(chalk.green('\n  No duplicate packages found!\n'))
+      return
+    }
+
+    console.log()
+    console.log(chalk.bold('📦 Duplicate Packages (multiple versions)'))
+    console.log(chalk.gray(`   ${resolvedPath}`))
+    console.log()
+
+    const table = new Table({
+      head: [
+        chalk.gray('Package'),
+        chalk.gray('Versions'),
+        chalk.gray('Total Size'),
+      ],
+      chars: {
+        'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
+        'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
+        'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
+        'right': '', 'right-mid': '', 'middle': ' ',
+      },
+      style: { 'padding-left': 1, 'padding-right': 1 },
+    })
+
+    for (const dup of dups.slice(0, top)) {
+      const versionsStr = dup.versions
+        .map(v => `${v.version} (${formatSize(v.size)})`)
+        .join(', ')
+      table.push([
+        chalk.yellow(dup.name),
+        chalk.gray(versionsStr),
+        colorSize(dup.totalSize, formatSize(dup.totalSize)),
+      ])
+    }
+
+    console.log(table.toString())
+
+    const wastedSize = dups.reduce((sum, d) => {
+      const sizes = d.versions.map(v => v.size).sort((a, b) => b - a)
+      return sum + sizes.slice(1).reduce((s, sz) => s + sz, 0)
+    }, 0)
+
+    console.log()
+    console.log(chalk.gray('─'.repeat(60)))
+    console.log()
+    console.log(chalk.bold('   Summary:'))
+    console.log(`     ${chalk.yellow('⚠')} ${dups.length} packages have multiple versions`)
+    console.log(`     ${chalk.red('✗')} Potential wasted space: ${chalk.red(formatSize(wastedSize))}`)
+    console.log()
+    return
+  }
+
+  // Apply filters and sorting
+  packages = filterPackages(packages, type)
+  packages = sortPackages(packages, sort)
+
   const totalSize = packages.reduce((sum, pkg) => sum + pkg.size, 0)
-  const maxSize = packages[0].size
+  const maxSize = packages.length > 0 ? Math.max(...packages.map(p => p.size)) : 0
 
-  // JSON output
+  const typeCounts = {
+    prod: packages.filter(p => p.type === 'prod').length,
+    dev: packages.filter(p => p.type === 'dev').length,
+    transitive: packages.filter(p => p.type === 'transitive').length,
+  }
+
+  const typeSizes = {
+    prod: packages.filter(p => p.type === 'prod').reduce((s, p) => s + p.size, 0),
+    dev: packages.filter(p => p.type === 'dev').reduce((s, p) => s + p.size, 0),
+    transitive: packages.filter(p => p.type === 'transitive').reduce((s, p) => s + p.size, 0),
+  }
+
+  spinner.succeed(`Found ${packages.length} packages${type !== 'all' ? ` (filtered: ${type})` : ''}`)
+
   if (json) {
     console.log(JSON.stringify({
       total: totalSize,
       count: packages.length,
+      byType: { counts: typeCounts, sizes: typeSizes },
       packages: packages.slice(0, top),
     }, null, 2))
     return
   }
 
-  // Terminal output
-  console.log(chalk.bold('📦 Dependency Size Analysis\n'))
+  console.log()
+  console.log(chalk.bold('📦 Dependency Size Analysis'))
+  console.log(chalk.gray(`   ${resolvedPath}`))
+  if (type !== 'all') {
+    console.log(chalk.cyan(`   Filtered: ${type} only`))
+  }
+  if (sort !== 'size') {
+    console.log(chalk.cyan(`   Sorted by: ${sort}`))
+  }
+  console.log()
+
+  console.log(chalk.gray('   Legend: ') +
+    chalk.green('● prod') + '  ' +
+    chalk.blue('● dev') + '  ' +
+    chalk.gray('○ transitive'))
+  console.log()
+
+  const table = new Table({
+    head: [
+      chalk.gray('Type'),
+      chalk.gray('Package'),
+      chalk.gray('Version'),
+      chalk.gray('Size'),
+      chalk.gray(''),
+    ],
+    chars: {
+      'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
+      'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
+      'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
+      'right': '', 'right-mid': '', 'middle': ' ',
+    },
+    style: { 'padding-left': 1, 'padding-right': 1 },
+  })
 
   const topPackages = packages.slice(0, top)
-  const maxNameLength = Math.max(...topPackages.map(p => p.name.length))
 
   for (const pkg of topPackages) {
-    const name = pkg.name.padEnd(maxNameLength)
-    const size = formatSize(pkg.size).padStart(10)
-    const bar = createBar(pkg.size / maxSize)
-
-    console.log(`${chalk.white(name)}  ${chalk.yellow(size)}  ${bar}`)
+    const sizeStr = formatSize(pkg.size)
+    table.push([
+      getTypeIcon(pkg.type),
+      chalk.white(pkg.name),
+      chalk.gray(pkg.version),
+      colorSize(pkg.size, sizeStr.padStart(10)),
+      createBar(pkg.size / maxSize),
+    ])
   }
 
-  console.log('')
-  console.log(chalk.gray('─'.repeat(50)))
-  console.log(chalk.bold(`Total: ${packages.length} packages, ${formatSize(totalSize)}`))
+  console.log(table.toString())
+
+  console.log()
+  console.log(chalk.gray('─'.repeat(60)))
+  console.log()
+
+  console.log(
+    chalk.bold('   Total: ') + chalk.white(formatSize(totalSize)) +
+    chalk.gray(' in ') + chalk.white(packages.length) + chalk.gray(' packages')
+  )
+  console.log()
+
+  if (type === 'all') {
+    console.log(chalk.gray('   Breakdown:'))
+    console.log(
+      `     ${chalk.green('●')} Production:  ${chalk.white(formatSize(typeSizes.prod).padStart(10))}  ${chalk.gray(`(${typeCounts.prod} packages)`)}`
+    )
+    console.log(
+      `     ${chalk.blue('●')} Development: ${chalk.white(formatSize(typeSizes.dev).padStart(10))}  ${chalk.gray(`(${typeCounts.dev} packages)`)}`
+    )
+    console.log(
+      `     ${chalk.gray('○')} Transitive:  ${chalk.white(formatSize(typeSizes.transitive).padStart(10))}  ${chalk.gray(`(${typeCounts.transitive} packages)`)}`
+    )
+  }
 
   if (packages.length > top) {
-    console.log(chalk.gray(`(showing top ${top}, use --top to see more)`))
+    console.log()
+    console.log(chalk.gray(`   Showing top ${top} of ${packages.length}. Use --top to see more.`))
   }
+  console.log()
 }
