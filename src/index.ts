@@ -1,7 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { exec } from 'node:child_process'
-import { promisify } from 'node:util'
 import chalk from 'chalk'
 import ora from 'ora'
 import Table from 'cli-table3'
@@ -9,8 +7,6 @@ import boxen from 'boxen'
 import figures from 'figures'
 import gradient from 'gradient-string'
 import { select, input, confirm, Separator } from '@inquirer/prompts'
-
-const execAsync = promisify(exec)
 
 // Custom gradient for the tool
 const pkgGradient = gradient(['#00d9ff', '#00ff87'])
@@ -122,9 +118,15 @@ function generateMarkdownReport(data: ExportData): string {
   lines.push(`|--------|-------|`)
   lines.push(`| Total Packages | ${data.summary.totalPackages} |`)
   lines.push(`| Total Size | ${data.summary.totalSize} |`)
-  lines.push(`| Production | ${data.summary.byType.prod.count} packages (${data.summary.byType.prod.size}) |`)
-  lines.push(`| Development | ${data.summary.byType.dev.count} packages (${data.summary.byType.dev.size}) |`)
-  lines.push(`| Transitive | ${data.summary.byType.transitive.count} packages (${data.summary.byType.transitive.size}) |`)
+  lines.push(
+    `| Production | ${data.summary.byType.prod.count} packages (${data.summary.byType.prod.size}) |`
+  )
+  lines.push(
+    `| Development | ${data.summary.byType.dev.count} packages (${data.summary.byType.dev.size}) |`
+  )
+  lines.push(
+    `| Transitive | ${data.summary.byType.transitive.count} packages (${data.summary.byType.transitive.size}) |`
+  )
   lines.push('')
 
   // Top packages by size
@@ -147,7 +149,7 @@ function generateMarkdownReport(data: ExportData): string {
     for (const dup of data.duplicates) {
       lines.push(`### ${dup.name}`)
       lines.push('')
-      lines.push(`- Versions: ${dup.versions.map(v => `${v.version} (${v.size})`).join(', ')}`)
+      lines.push(`- Versions: ${dup.versions.map((v) => `${v.version} (${v.size})`).join(', ')}`)
       lines.push(`- Wasted space: **${dup.wastedSpace}**`)
       lines.push('')
     }
@@ -181,7 +183,9 @@ function generateMarkdownReport(data: ExportData): string {
   lines.push(`- Transitive: ${data.summary.byType.transitive.count} packages`)
   if (data.duplicates && data.duplicates.length > 0) {
     const totalWasted = data.duplicates.reduce((sum, d) => sum + d.wastedSpaceBytes, 0)
-    lines.push(`- Duplicate packages: ${data.duplicates.length} (wasting ~${formatSize(totalWasted)})`)
+    lines.push(
+      `- Duplicate packages: ${data.duplicates.length} (wasting ~${formatSize(totalWasted)})`
+    )
   }
   if (data.unused && data.unused.length > 0) {
     lines.push(`- Potentially unused: ${data.unused.length} packages`)
@@ -315,11 +319,16 @@ function createBar(ratio: number, width: number = 20): string {
  */
 function getTypeIcon(type: PackageInfo['type']): string {
   switch (type) {
-    case 'prod': return chalk.green(figures.circleFilled)
-    case 'dev': return chalk.blue(figures.circleFilled)
-    case 'peer': return chalk.magenta(figures.circleFilled)
-    case 'optional': return chalk.yellow(figures.circleFilled)
-    case 'transitive': return chalk.gray(figures.circle)
+    case 'prod':
+      return chalk.green(figures.circleFilled)
+    case 'dev':
+      return chalk.blue(figures.circleFilled)
+    case 'peer':
+      return chalk.magenta(figures.circleFilled)
+    case 'optional':
+      return chalk.yellow(figures.circleFilled)
+    case 'transitive':
+      return chalk.gray(figures.circle)
   }
 }
 
@@ -328,9 +337,11 @@ function getTypeIcon(type: PackageInfo['type']): string {
  */
 function printHeader(title: string, subtitle?: string): void {
   console.log()
-  console.log(pkgGradient.multiline(`  ╔═══════════════════════════════════════════════════════╗
+  console.log(
+    pkgGradient.multiline(`  ╔═══════════════════════════════════════════════════════╗
   ║  ${title.padEnd(52)} ║
-  ╚═══════════════════════════════════════════════════════╝`))
+  ╚═══════════════════════════════════════════════════════╝`)
+  )
   if (subtitle) {
     console.log(chalk.gray(`  ${subtitle}`))
   }
@@ -342,12 +353,14 @@ function printHeader(title: string, subtitle?: string): void {
  */
 function printSummaryBox(lines: string[]): void {
   const content = lines.join('\n')
-  console.log(boxen(content, {
-    padding: 1,
-    margin: { top: 1, bottom: 1, left: 2, right: 2 },
-    borderStyle: 'round',
-    borderColor: 'cyan',
-  }))
+  console.log(
+    boxen(content, {
+      padding: 1,
+      margin: { top: 1, bottom: 1, left: 2, right: 2 },
+      borderStyle: 'round',
+      borderColor: 'cyan',
+    })
+  )
 }
 
 /**
@@ -368,16 +381,16 @@ function getProjectDeps(projectPath: string): ProjectDeps {
     const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
 
     if (pkgJson.dependencies) {
-      Object.keys(pkgJson.dependencies).forEach(d => deps.prod.add(d))
+      Object.keys(pkgJson.dependencies).forEach((d) => deps.prod.add(d))
     }
     if (pkgJson.devDependencies) {
-      Object.keys(pkgJson.devDependencies).forEach(d => deps.dev.add(d))
+      Object.keys(pkgJson.devDependencies).forEach((d) => deps.dev.add(d))
     }
     if (pkgJson.peerDependencies) {
-      Object.keys(pkgJson.peerDependencies).forEach(d => deps.peer.add(d))
+      Object.keys(pkgJson.peerDependencies).forEach((d) => deps.peer.add(d))
     }
     if (pkgJson.optionalDependencies) {
-      Object.keys(pkgJson.optionalDependencies).forEach(d => deps.optional.add(d))
+      Object.keys(pkgJson.optionalDependencies).forEach((d) => deps.optional.add(d))
     }
   } catch {
     // Ignore errors
@@ -419,7 +432,11 @@ function detectPackageManager(projectPath: string): PackageManager {
 /**
  * Get all packages from node_modules (supports pnpm, yarn, npm)
  */
-function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spinner: ReturnType<typeof ora>): PackageInfo[] {
+function getPackagesFromNodeModules(
+  projectPath: string,
+  deps: ProjectDeps,
+  spinner: ReturnType<typeof ora>
+): PackageInfo[] {
   const nodeModulesPath = path.join(projectPath, 'node_modules')
 
   if (!fs.existsSync(nodeModulesPath)) {
@@ -455,7 +472,7 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
     }
 
     const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
-    const total = entries.filter(e => e.isDirectory()).length
+    const total = entries.filter((e) => e.isDirectory()).length
     let processed = 0
 
     for (const entry of entries) {
@@ -594,7 +611,7 @@ function findDuplicates(packages: PackageInfo[]): DuplicateInfo[] {
 
   for (const [name, pkgs] of byName) {
     if (pkgs.length > 1) {
-      const versions = pkgs.map(p => ({ version: p.version, size: p.size }))
+      const versions = pkgs.map((p) => ({ version: p.version, size: p.size }))
       const totalSize = pkgs.reduce((sum, p) => sum + p.size, 0)
       duplicates.push({ name, versions, totalSize })
     }
@@ -624,9 +641,12 @@ function sortPackages(packages: PackageInfo[], sortBy: 'size' | 'name' | 'type')
 /**
  * Filter packages by type
  */
-function filterPackages(packages: PackageInfo[], type: 'prod' | 'dev' | 'transitive' | 'all'): PackageInfo[] {
+function filterPackages(
+  packages: PackageInfo[],
+  type: 'prod' | 'dev' | 'transitive' | 'all'
+): PackageInfo[] {
   if (type === 'all') return packages
-  return packages.filter(p => p.type === type)
+  return packages.filter((p) => p.type === type)
 }
 
 /**
@@ -743,7 +763,7 @@ function buildTree(
 /**
  * Print dependency tree
  */
-function printTree(nodes: TreeNode[], prefix: string = '', isLast: boolean[] = []): void {
+function printTree(nodes: TreeNode[], _prefix: string = '', isLast: boolean[] = []): void {
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i]
     const isLastNode = i === nodes.length - 1
@@ -804,7 +824,8 @@ function scanImports(projectPath: string): Set<string> {
       const content = fs.readFileSync(filePath, 'utf-8')
 
       // Match import statements: import x from 'package' or import 'package'
-      const importRegex = /(?:import\s+(?:[\w{},*\s]+\s+from\s+)?['"]([^'"./][^'"]*)['"'])|(?:require\s*\(\s*['"]([^'"./][^'"]*)['"]\s*\))/g
+      const importRegex =
+        /(?:import\s+(?:[\w{},*\s]+\s+from\s+)?['"]([^'"./][^'"]*)['"'])|(?:require\s*\(\s*['"]([^'"./][^'"]*)['"]\s*\))/g
 
       let match
       while ((match = importRegex.exec(content)) !== null) {
@@ -842,7 +863,7 @@ function findUnused(
   // Check prod dependencies
   for (const depName of projectDeps.prod) {
     if (!usedImports.has(depName)) {
-      const pkg = packages.find(p => p.name === depName)
+      const pkg = packages.find((p) => p.name === depName)
       if (pkg) {
         unused.push({
           name: depName,
@@ -857,24 +878,36 @@ function findUnused(
   // Check dev dependencies (only check for common dev tool usage patterns)
   const devToolPatterns = [
     // Build tools often referenced in config files
-    'typescript', 'tsup', 'esbuild', 'webpack', 'rollup', 'vite', 'parcel',
+    'typescript',
+    'tsup',
+    'esbuild',
+    'webpack',
+    'rollup',
+    'vite',
+    'parcel',
     // Test tools
-    'jest', 'vitest', 'mocha', 'chai', 'ava',
+    'jest',
+    'vitest',
+    'mocha',
+    'chai',
+    'ava',
     // Linters/formatters
-    'eslint', 'prettier', 'stylelint',
+    'eslint',
+    'prettier',
+    'stylelint',
     // Type definitions
     '@types/',
   ]
 
   for (const depName of projectDeps.dev) {
     // Skip common dev tools that may not be directly imported
-    const isDevTool = devToolPatterns.some(pattern =>
-      depName.startsWith(pattern) || depName === pattern
+    const isDevTool = devToolPatterns.some(
+      (pattern) => depName.startsWith(pattern) || depName === pattern
     )
     if (isDevTool) continue
 
     if (!usedImports.has(depName)) {
-      const pkg = packages.find(p => p.name === depName)
+      const pkg = packages.find((p) => p.name === depName)
       if (pkg) {
         unused.push({
           name: depName,
@@ -897,26 +930,35 @@ async function runInteractiveMode(projectPath: string): Promise<void> {
 
   // Print interactive header
   console.clear()
-  console.log(boxen(
-    pkgGradient.multiline([
-      '╔═══════════════════════════════════════════════════════╗',
-      '║         PKG-ANALYZER INTERACTIVE MODE                 ║',
-      '╚═══════════════════════════════════════════════════════╝',
-    ].join('\n')) + '\n\n' + chalk.gray(`  Project: ${resolvedPath}`),
-    {
-      padding: 1,
-      margin: 1,
-      borderStyle: 'double',
-      borderColor: 'cyan',
-    }
-  ))
+  console.log(
+    boxen(
+      pkgGradient.multiline(
+        [
+          '╔═══════════════════════════════════════════════════════╗',
+          '║         PKG-ANALYZER INTERACTIVE MODE                 ║',
+          '╚═══════════════════════════════════════════════════════╝',
+        ].join('\n')
+      ) +
+        '\n\n' +
+        chalk.gray(`  Project: ${resolvedPath}`),
+      {
+        padding: 1,
+        margin: 1,
+        borderStyle: 'double',
+        borderColor: 'cyan',
+      }
+    )
+  )
 
   while (true) {
     const action = await select({
       message: chalk.cyan('What would you like to do?'),
       choices: [
         { name: `${chalk.green(figures.play)} Analyze top packages by size`, value: 'top' },
-        { name: `${chalk.blue(figures.circleFilled)} Filter by type (prod/dev/transitive)`, value: 'type' },
+        {
+          name: `${chalk.blue(figures.circleFilled)} Filter by type (prod/dev/transitive)`,
+          value: 'type',
+        },
         { name: `${chalk.magenta(figures.pointer)} Search packages by name`, value: 'search' },
         { name: `${chalk.yellow(figures.warning)} Find duplicate packages`, value: 'duplicates' },
         { name: `${chalk.red(figures.cross)} Detect unused dependencies`, value: 'unused' },
@@ -951,9 +993,7 @@ async function runInteractiveMode(projectPath: string): Promise<void> {
         ],
       })
       await analyze(projectPath, { top: count, sort: sortBy })
-    }
-
-    else if (action === 'type') {
+    } else if (action === 'type') {
       const pkgType = await select({
         message: 'Which type of dependencies?',
         choices: [
@@ -972,25 +1012,17 @@ async function runInteractiveMode(projectPath: string): Promise<void> {
         ],
       })
       await analyze(projectPath, { type: pkgType, top: count })
-    }
-
-    else if (action === 'search') {
+    } else if (action === 'search') {
       const keyword = await input({
         message: 'Enter package name to search:',
         validate: (val: string) => val.trim().length > 0 || 'Please enter a keyword',
       })
       await analyze(projectPath, { filter: keyword.trim(), top: 999 })
-    }
-
-    else if (action === 'duplicates') {
+    } else if (action === 'duplicates') {
       await analyze(projectPath, { duplicates: true })
-    }
-
-    else if (action === 'unused') {
+    } else if (action === 'unused') {
       await analyze(projectPath, { unused: true })
-    }
-
-    else if (action === 'tree') {
+    } else if (action === 'tree') {
       const treeDepth = await select({
         message: 'Tree depth?',
         choices: [
@@ -1037,7 +1069,7 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     interactive = false,
     json = false,
     exportFile,
-    copyToClipboard: shouldCopy = false
+    copyToClipboard: shouldCopy = false,
   } = options
 
   const resolvedPath = path.resolve(projectPath)
@@ -1046,7 +1078,9 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
   const nodeModulesPath = path.join(resolvedPath, 'node_modules')
   if (!fs.existsSync(nodeModulesPath)) {
     console.log(chalk.red(`${figures.cross} node_modules not found at ${resolvedPath}`))
-    console.log(chalk.gray(`  Run ${chalk.cyan('npm install')} or ${chalk.cyan('pnpm install')} first.\n`))
+    console.log(
+      chalk.gray(`  Run ${chalk.cyan('npm install')} or ${chalk.cyan('pnpm install')} first.\n`)
+    )
     return
   }
 
@@ -1081,34 +1115,45 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (unusedDeps.length === 0) {
-      console.log(boxen(
-        chalk.green(`${figures.tick} No unused dependencies found!`),
-        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'green' }
-      ))
+      console.log(
+        boxen(chalk.green(`${figures.tick} No unused dependencies found!`), {
+          padding: 1,
+          margin: 1,
+          borderStyle: 'round',
+          borderColor: 'green',
+        })
+      )
       return
     }
 
     printHeader('UNUSED DEPENDENCIES', resolvedPath)
 
     const table = new Table({
-      head: [
-        chalk.cyan(''),
-        chalk.cyan('Package'),
-        chalk.cyan('Version'),
-        chalk.cyan('Size'),
-      ],
+      head: [chalk.cyan(''), chalk.cyan('Package'), chalk.cyan('Version'), chalk.cyan('Size')],
       chars: {
-        'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
-        'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
-        'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
-        'right': '│', 'right-mid': '┤', 'middle': '│',
+        top: '─',
+        'top-mid': '┬',
+        'top-left': '┌',
+        'top-right': '┐',
+        bottom: '─',
+        'bottom-mid': '┴',
+        'bottom-left': '└',
+        'bottom-right': '┘',
+        left: '│',
+        'left-mid': '├',
+        mid: '─',
+        'mid-mid': '┼',
+        right: '│',
+        'right-mid': '┤',
+        middle: '│',
       },
       style: { 'padding-left': 1, 'padding-right': 1 },
       colWidths: [4, 35, 12, 12],
     })
 
     for (const dep of unusedDeps) {
-      const typeIcon = dep.type === 'prod' ? chalk.green(figures.circleFilled) : chalk.blue(figures.circleFilled)
+      const typeIcon =
+        dep.type === 'prod' ? chalk.green(figures.circleFilled) : chalk.blue(figures.circleFilled)
       table.push([
         typeIcon,
         chalk.bold.yellow(dep.name),
@@ -1120,29 +1165,39 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     console.log(table.toString())
 
     const totalUnusedSize = unusedDeps.reduce((sum, d) => sum + d.size, 0)
-    const prodUnused = unusedDeps.filter(d => d.type === 'prod')
-    const devUnused = unusedDeps.filter(d => d.type === 'dev')
+    const prodUnused = unusedDeps.filter((d) => d.type === 'prod')
+    const devUnused = unusedDeps.filter((d) => d.type === 'dev')
 
     const summaryLines: string[] = []
-    summaryLines.push(warnGradient(`${figures.warning} ${unusedDeps.length} potentially unused dependencies`))
+    summaryLines.push(
+      warnGradient(`${figures.warning} ${unusedDeps.length} potentially unused dependencies`)
+    )
     summaryLines.push('')
     if (prodUnused.length > 0) {
-      summaryLines.push(`  ${chalk.green(figures.circleFilled)} ${prodUnused.length} production  ${chalk.gray(`(${formatSize(prodUnused.reduce((s, d) => s + d.size, 0))})`)}`)
+      summaryLines.push(
+        `  ${chalk.green(figures.circleFilled)} ${prodUnused.length} production  ${chalk.gray(`(${formatSize(prodUnused.reduce((s, d) => s + d.size, 0))})`)}`
+      )
     }
     if (devUnused.length > 0) {
-      summaryLines.push(`  ${chalk.blue(figures.circleFilled)} ${devUnused.length} development ${chalk.gray(`(${formatSize(devUnused.reduce((s, d) => s + d.size, 0))})`)}`)
+      summaryLines.push(
+        `  ${chalk.blue(figures.circleFilled)} ${devUnused.length} development ${chalk.gray(`(${formatSize(devUnused.reduce((s, d) => s + d.size, 0))})`)}`
+      )
     }
     summaryLines.push('')
-    summaryLines.push(chalk.red(`${figures.cross} Potential savings: ${formatSize(totalUnusedSize)}`))
+    summaryLines.push(
+      chalk.red(`${figures.cross} Potential savings: ${formatSize(totalUnusedSize)}`)
+    )
     summaryLines.push('')
     summaryLines.push(chalk.gray.italic('Note: Static analysis only. Verify before removing.'))
 
-    console.log(boxen(summaryLines.join('\n'), {
-      padding: 1,
-      margin: { top: 1, bottom: 1, left: 2, right: 2 },
-      borderStyle: 'round',
-      borderColor: 'yellow',
-    }))
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: 'yellow',
+      })
+    )
     return
   }
 
@@ -1159,10 +1214,14 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (treeNodes.length === 0) {
-      console.log(boxen(
-        chalk.yellow(`${figures.warning} ${packageName ? `Package "${packageName}" not found` : 'No dependencies found'}`),
-        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'yellow' }
-      ))
+      console.log(
+        boxen(
+          chalk.yellow(
+            `${figures.warning} ${packageName ? `Package "${packageName}" not found` : 'No dependencies found'}`
+          ),
+          { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'yellow' }
+        )
+      )
       return
     }
 
@@ -1190,26 +1249,37 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (dups.length === 0) {
-      console.log(boxen(
-        chalk.green(`${figures.tick} No duplicate packages found!`),
-        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'green' }
-      ))
+      console.log(
+        boxen(chalk.green(`${figures.tick} No duplicate packages found!`), {
+          padding: 1,
+          margin: 1,
+          borderStyle: 'round',
+          borderColor: 'green',
+        })
+      )
       return
     }
 
     printHeader('DUPLICATE PACKAGES', resolvedPath)
 
     const table = new Table({
-      head: [
-        chalk.cyan('Package'),
-        chalk.cyan('Versions'),
-        chalk.cyan('Total'),
-      ],
+      head: [chalk.cyan('Package'), chalk.cyan('Versions'), chalk.cyan('Total')],
       chars: {
-        'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
-        'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
-        'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
-        'right': '│', 'right-mid': '┤', 'middle': '│',
+        top: '─',
+        'top-mid': '┬',
+        'top-left': '┌',
+        'top-right': '┐',
+        bottom: '─',
+        'bottom-mid': '┴',
+        'bottom-left': '└',
+        'bottom-right': '┘',
+        left: '│',
+        'left-mid': '├',
+        mid: '─',
+        'mid-mid': '┼',
+        right: '│',
+        'right-mid': '┤',
+        middle: '│',
       },
       style: { 'padding-left': 1, 'padding-right': 1 },
       colWidths: [25, 40, 12],
@@ -1217,7 +1287,7 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
     for (const dup of dups.slice(0, top)) {
       const versionsStr = dup.versions
-        .map(v => `${chalk.cyan(v.version)} ${chalk.gray(`(${formatSize(v.size)})`)}`)
+        .map((v) => `${chalk.cyan(v.version)} ${chalk.gray(`(${formatSize(v.size)})`)}`)
         .join(chalk.gray(' | '))
       table.push([
         chalk.bold.yellow(dup.name),
@@ -1229,21 +1299,27 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     console.log(table.toString())
 
     const wastedSize = dups.reduce((sum, d) => {
-      const sizes = d.versions.map(v => v.size).sort((a, b) => b - a)
+      const sizes = d.versions.map((v) => v.size).sort((a, b) => b - a)
       return sum + sizes.slice(1).reduce((s, sz) => s + sz, 0)
     }, 0)
 
     const summaryLines: string[] = []
-    summaryLines.push(warnGradient(`${figures.warning} ${dups.length} packages have multiple versions`))
+    summaryLines.push(
+      warnGradient(`${figures.warning} ${dups.length} packages have multiple versions`)
+    )
     summaryLines.push('')
-    summaryLines.push(chalk.red(`${figures.cross} Potential wasted space: ${formatSize(wastedSize)}`))
+    summaryLines.push(
+      chalk.red(`${figures.cross} Potential wasted space: ${formatSize(wastedSize)}`)
+    )
 
-    console.log(boxen(summaryLines.join('\n'), {
-      padding: 1,
-      margin: { top: 1, bottom: 1, left: 2, right: 2 },
-      borderStyle: 'round',
-      borderColor: 'yellow',
-    }))
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: 'yellow',
+      })
+    )
     return
   }
 
@@ -1253,11 +1329,15 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
   // Apply keyword filter
   if (filter) {
     const keyword = filter.toLowerCase()
-    packages = packages.filter(p => p.name.toLowerCase().includes(keyword))
+    packages = packages.filter((p) => p.name.toLowerCase().includes(keyword))
 
     if (packages.length === 0) {
       spinner.fail(`No packages found matching "${filter}"`)
-      console.log(chalk.gray(`\n  Try a different keyword or use ${chalk.cyan('--type all')} to search all packages.\n`))
+      console.log(
+        chalk.gray(
+          `\n  Try a different keyword or use ${chalk.cyan('--type all')} to search all packages.\n`
+        )
+      )
       return
     }
   }
@@ -1265,18 +1345,18 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
   packages = sortPackages(packages, sort)
 
   const totalSize = packages.reduce((sum, pkg) => sum + pkg.size, 0)
-  const maxSize = packages.length > 0 ? Math.max(...packages.map(p => p.size)) : 0
+  const maxSize = packages.length > 0 ? Math.max(...packages.map((p) => p.size)) : 0
 
   const typeCounts = {
-    prod: packages.filter(p => p.type === 'prod').length,
-    dev: packages.filter(p => p.type === 'dev').length,
-    transitive: packages.filter(p => p.type === 'transitive').length,
+    prod: packages.filter((p) => p.type === 'prod').length,
+    dev: packages.filter((p) => p.type === 'dev').length,
+    transitive: packages.filter((p) => p.type === 'transitive').length,
   }
 
   const typeSizes = {
-    prod: packages.filter(p => p.type === 'prod').reduce((s, p) => s + p.size, 0),
-    dev: packages.filter(p => p.type === 'dev').reduce((s, p) => s + p.size, 0),
-    transitive: packages.filter(p => p.type === 'transitive').reduce((s, p) => s + p.size, 0),
+    prod: packages.filter((p) => p.type === 'prod').reduce((s, p) => s + p.size, 0),
+    dev: packages.filter((p) => p.type === 'dev').reduce((s, p) => s + p.size, 0),
+    transitive: packages.filter((p) => p.type === 'transitive').reduce((s, p) => s + p.size, 0),
   }
 
   const filterInfo: string[] = []
@@ -1285,7 +1365,9 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
   const packageManager = detectPackageManager(resolvedPath)
 
-  spinner.succeed(`Found ${packages.length} packages${filterInfo.length ? ` (${filterInfo.join(', ')})` : ''}`)
+  spinner.succeed(
+    `Found ${packages.length} packages${filterInfo.length ? ` (${filterInfo.join(', ')})` : ''}`
+  )
 
   // Handle export or copy mode
   if (exportFile || shouldCopy) {
@@ -1303,39 +1385,53 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
         totalSize: formatSize(totalSize),
         totalSizeBytes: totalSize,
         byType: {
-          prod: { count: typeCounts.prod, size: formatSize(typeSizes.prod), sizeBytes: typeSizes.prod },
+          prod: {
+            count: typeCounts.prod,
+            size: formatSize(typeSizes.prod),
+            sizeBytes: typeSizes.prod,
+          },
           dev: { count: typeCounts.dev, size: formatSize(typeSizes.dev), sizeBytes: typeSizes.dev },
-          transitive: { count: typeCounts.transitive, size: formatSize(typeSizes.transitive), sizeBytes: typeSizes.transitive },
+          transitive: {
+            count: typeCounts.transitive,
+            size: formatSize(typeSizes.transitive),
+            sizeBytes: typeSizes.transitive,
+          },
         },
       },
-      packages: allPackagesSorted.map(p => ({
+      packages: allPackagesSorted.map((p) => ({
         name: p.name,
         version: p.version,
         size: formatSize(p.size),
         sizeBytes: p.size,
         type: p.type,
       })),
-      duplicates: dups.length > 0 ? dups.map(d => {
-        const sizes = d.versions.map(v => v.size).sort((a, b) => b - a)
-        const wastedBytes = sizes.slice(1).reduce((s, sz) => s + sz, 0)
-        return {
-          name: d.name,
-          versions: d.versions.map(v => ({
-            version: v.version,
-            size: formatSize(v.size),
-            sizeBytes: v.size,
-          })),
-          wastedSpace: formatSize(wastedBytes),
-          wastedSpaceBytes: wastedBytes,
-        }
-      }) : undefined,
-      unused: unusedDeps.length > 0 ? unusedDeps.map(u => ({
-        name: u.name,
-        version: u.version,
-        size: formatSize(u.size),
-        sizeBytes: u.size,
-        type: u.type,
-      })) : undefined,
+      duplicates:
+        dups.length > 0
+          ? dups.map((d) => {
+              const sizes = d.versions.map((v) => v.size).sort((a, b) => b - a)
+              const wastedBytes = sizes.slice(1).reduce((s, sz) => s + sz, 0)
+              return {
+                name: d.name,
+                versions: d.versions.map((v) => ({
+                  version: v.version,
+                  size: formatSize(v.size),
+                  sizeBytes: v.size,
+                })),
+                wastedSpace: formatSize(wastedBytes),
+                wastedSpaceBytes: wastedBytes,
+              }
+            })
+          : undefined,
+      unused:
+        unusedDeps.length > 0
+          ? unusedDeps.map((u) => ({
+              name: u.name,
+              version: u.version,
+              size: formatSize(u.size),
+              sizeBytes: u.size,
+              type: u.type,
+            }))
+          : undefined,
     }
 
     // Export to file if specified
@@ -1351,7 +1447,9 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
       if (copied) {
         console.log(chalk.green(`${figures.tick} Copied report to clipboard`))
       } else {
-        console.log(chalk.yellow(`${figures.warning} Could not copy to clipboard. Report saved to stdout:`))
+        console.log(
+          chalk.yellow(`${figures.warning} Could not copy to clipboard. Report saved to stdout:`)
+        )
         console.log(chalk.gray('---'))
         console.log(markdown)
         console.log(chalk.gray('---'))
@@ -1362,39 +1460,56 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     console.log(chalk.gray(`\n  Summary:`))
     console.log(chalk.gray(`  - ${packages.length} packages (${formatSize(totalSize)})`))
     if (dups.length > 0) console.log(chalk.gray(`  - ${dups.length} duplicates`))
-    if (unusedDeps.length > 0) console.log(chalk.gray(`  - ${unusedDeps.length} potentially unused`))
+    if (unusedDeps.length > 0)
+      console.log(chalk.gray(`  - ${unusedDeps.length} potentially unused`))
     console.log()
     return
   }
 
   if (json) {
-    console.log(JSON.stringify({
-      total: totalSize,
-      count: packages.length,
-      byType: { counts: typeCounts, sizes: typeSizes },
-      packages: packages.slice(0, top),
-    }, null, 2))
+    console.log(
+      JSON.stringify(
+        {
+          total: totalSize,
+          count: packages.length,
+          byType: { counts: typeCounts, sizes: typeSizes },
+          packages: packages.slice(0, top),
+        },
+        null,
+        2
+      )
+    )
     return
   }
 
   // Build subtitle info (reuse filterInfo from above, add sort info)
   if (sort !== 'size') filterInfo.push(`sort: ${sort}`)
-  const subtitle = filterInfo.length > 0
-    ? `${resolvedPath}  ${chalk.cyan(figures.arrowRight)}  ${filterInfo.join(', ')}`
-    : resolvedPath
+  const subtitle =
+    filterInfo.length > 0
+      ? `${resolvedPath}  ${chalk.cyan(figures.arrowRight)}  ${filterInfo.join(', ')}`
+      : resolvedPath
 
   printHeader('DEPENDENCY SIZE ANALYSIS', subtitle)
 
   // Legend
-  console.log(chalk.gray('  Legend: ') +
-    chalk.green(figures.circleFilled + ' prod') + '  ' +
-    chalk.blue(figures.circleFilled + ' dev') + '  ' +
-    chalk.gray(figures.circle + ' transitive') + '    ' +
-    chalk.gray('Size: ') +
-    chalk.green('■') + chalk.gray('<100KB ') +
-    chalk.white('■') + chalk.gray('<1MB ') +
-    chalk.yellow('■') + chalk.gray('<5MB ') +
-    chalk.red('■') + chalk.gray('>5MB'))
+  console.log(
+    chalk.gray('  Legend: ') +
+      chalk.green(figures.circleFilled + ' prod') +
+      '  ' +
+      chalk.blue(figures.circleFilled + ' dev') +
+      '  ' +
+      chalk.gray(figures.circle + ' transitive') +
+      '    ' +
+      chalk.gray('Size: ') +
+      chalk.green('■') +
+      chalk.gray('<100KB ') +
+      chalk.white('■') +
+      chalk.gray('<1MB ') +
+      chalk.yellow('■') +
+      chalk.gray('<5MB ') +
+      chalk.red('■') +
+      chalk.gray('>5MB')
+  )
   console.log()
 
   // Table with better styling
@@ -1407,10 +1522,21 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
       chalk.cyan(''),
     ],
     chars: {
-      'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
-      'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
-      'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
-      'right': '│', 'right-mid': '┤', 'middle': '│',
+      top: '─',
+      'top-mid': '┬',
+      'top-left': '┌',
+      'top-right': '┐',
+      bottom: '─',
+      'bottom-mid': '┴',
+      'bottom-left': '└',
+      'bottom-right': '┘',
+      left: '│',
+      'left-mid': '├',
+      mid: '─',
+      'mid-mid': '┼',
+      right: '│',
+      'right-mid': '┤',
+      middle: '│',
     },
     style: { 'padding-left': 1, 'padding-right': 1, head: ['cyan'] },
     colWidths: [4, 35, 12, 12, 24],
@@ -1434,19 +1560,33 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
   // Summary box
   const summaryLines: string[] = []
-  summaryLines.push(chalk.bold(`${figures.info} Total: `) + chalk.white.bold(formatSize(totalSize)) + chalk.gray(` in ${packages.length} packages`))
+  summaryLines.push(
+    chalk.bold(`${figures.info} Total: `) +
+      chalk.white.bold(formatSize(totalSize)) +
+      chalk.gray(` in ${packages.length} packages`)
+  )
   summaryLines.push('')
 
   if (type === 'all') {
     summaryLines.push(chalk.gray('Breakdown by type:'))
-    summaryLines.push(`  ${chalk.green(figures.circleFilled)} Production:  ${chalk.white(formatSize(typeSizes.prod).padStart(10))}  ${chalk.gray(`(${typeCounts.prod} pkgs)`)}`)
-    summaryLines.push(`  ${chalk.blue(figures.circleFilled)} Development: ${chalk.white(formatSize(typeSizes.dev).padStart(10))}  ${chalk.gray(`(${typeCounts.dev} pkgs)`)}`)
-    summaryLines.push(`  ${chalk.gray(figures.circle)} Transitive:  ${chalk.white(formatSize(typeSizes.transitive).padStart(10))}  ${chalk.gray(`(${typeCounts.transitive} pkgs)`)}`)
+    summaryLines.push(
+      `  ${chalk.green(figures.circleFilled)} Production:  ${chalk.white(formatSize(typeSizes.prod).padStart(10))}  ${chalk.gray(`(${typeCounts.prod} pkgs)`)}`
+    )
+    summaryLines.push(
+      `  ${chalk.blue(figures.circleFilled)} Development: ${chalk.white(formatSize(typeSizes.dev).padStart(10))}  ${chalk.gray(`(${typeCounts.dev} pkgs)`)}`
+    )
+    summaryLines.push(
+      `  ${chalk.gray(figures.circle)} Transitive:  ${chalk.white(formatSize(typeSizes.transitive).padStart(10))}  ${chalk.gray(`(${typeCounts.transitive} pkgs)`)}`
+    )
   }
 
   if (packages.length > top) {
     summaryLines.push('')
-    summaryLines.push(chalk.gray(`Showing top ${top} of ${packages.length}. Use ${chalk.cyan('--top')} to see more.`))
+    summaryLines.push(
+      chalk.gray(
+        `Showing top ${top} of ${packages.length}. Use ${chalk.cyan('--top')} to see more.`
+      )
+    )
   }
 
   printSummaryBox(summaryLines)

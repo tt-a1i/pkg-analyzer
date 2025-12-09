@@ -21,34 +21,39 @@ program
   .option('--json', 'Output as JSON')
   .option('-e, --export <file>', 'Export analysis to file (supports .json, .md)')
   .option('-c, --copy', 'Copy analysis report to clipboard (markdown format)')
-  .action(async (path: string, options: {
-    top: string
-    type: string
-    sort: string
-    duplicates: boolean
-    tree?: string | boolean
-    depth: string
-    unused: boolean
-    filter?: string
-    interactive: boolean
-    json: boolean
-    export?: string
-    copy: boolean
-  }) => {
-    await analyze(path, {
-      top: parseInt(options.top, 10),
-      type: options.type as 'prod' | 'dev' | 'transitive' | 'all',
-      sort: options.sort as 'size' | 'name' | 'type',
-      duplicates: options.duplicates,
-      tree: options.tree,
-      depth: parseInt(options.depth, 10),
-      unused: options.unused,
-      filter: options.filter,
-      interactive: options.interactive,
-      json: options.json,
-      exportFile: options.export,
-      copyToClipboard: options.copy,
-    })
-  })
+  .action(
+    async (
+      path: string,
+      options: {
+        top: string
+        type: string
+        sort: string
+        duplicates: boolean
+        tree?: string | boolean
+        depth: string
+        unused: boolean
+        filter?: string
+        interactive: boolean
+        json: boolean
+        export?: string
+        copy: boolean
+      }
+    ) => {
+      await analyze(path, {
+        top: parseInt(options.top, 10),
+        type: options.type as 'prod' | 'dev' | 'transitive' | 'all',
+        sort: options.sort as 'size' | 'name' | 'type',
+        duplicates: options.duplicates,
+        tree: options.tree,
+        depth: parseInt(options.depth, 10),
+        unused: options.unused,
+        filter: options.filter,
+        interactive: options.interactive,
+        json: options.json,
+        exportFile: options.export,
+        copyToClipboard: options.copy,
+      })
+    }
+  )
 
 program.parse()
