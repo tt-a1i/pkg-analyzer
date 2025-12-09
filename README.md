@@ -1,6 +1,8 @@
 # pkg-analyzer
 
 [![npm version](https://img.shields.io/npm/v/@tt-a1i/pkg-analyzer.svg)](https://www.npmjs.com/package/@tt-a1i/pkg-analyzer)
+[![CI](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/node/v/@tt-a1i/pkg-analyzer.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A powerful CLI tool to analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, and export reports for AI-powered optimization suggestions.
