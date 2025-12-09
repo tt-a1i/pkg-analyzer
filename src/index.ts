@@ -3,7 +3,13 @@ import path from 'node:path'
 import chalk from 'chalk'
 import ora from 'ora'
 import Table from 'cli-table3'
-import YAML from 'yaml'
+import boxen from 'boxen'
+import figures from 'figures'
+import gradient from 'gradient-string'
+
+// Custom gradient for the tool
+const pkgGradient = gradient(['#00d9ff', '#00ff87'])
+const warnGradient = gradient(['#ffaa00', '#ff5500'])
 
 interface PackageInfo {
   name: string
@@ -118,12 +124,39 @@ function createBar(ratio: number, width: number = 20): string {
  */
 function getTypeIcon(type: PackageInfo['type']): string {
   switch (type) {
-    case 'prod': return chalk.green('●')
-    case 'dev': return chalk.blue('●')
-    case 'peer': return chalk.magenta('●')
-    case 'optional': return chalk.yellow('●')
-    case 'transitive': return chalk.gray('○')
+    case 'prod': return chalk.green(figures.circleFilled)
+    case 'dev': return chalk.blue(figures.circleFilled)
+    case 'peer': return chalk.magenta(figures.circleFilled)
+    case 'optional': return chalk.yellow(figures.circleFilled)
+    case 'transitive': return chalk.gray(figures.circle)
   }
+}
+
+/**
+ * Print styled header
+ */
+function printHeader(title: string, subtitle?: string): void {
+  console.log()
+  console.log(pkgGradient.multiline(`  ╔═══════════════════════════════════════════════════════╗
+  ║  ${title.padEnd(52)} ║
+  ╚═══════════════════════════════════════════════════════╝`))
+  if (subtitle) {
+    console.log(chalk.gray(`  ${subtitle}`))
+  }
+  console.log()
+}
+
+/**
+ * Print summary box
+ */
+function printSummaryBox(lines: string[]): void {
+  const content = lines.join('\n')
+  console.log(boxen(content, {
+    padding: 1,
+    margin: { top: 1, bottom: 1, left: 2, right: 2 },
+    borderStyle: 'round',
+    borderColor: 'cyan',
+  }))
 }
 
 /**
@@ -632,33 +665,34 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (unusedDeps.length === 0) {
-      console.log(chalk.green('\n  No unused dependencies found!\n'))
+      console.log(boxen(
+        chalk.green(`${figures.tick} No unused dependencies found!`),
+        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'green' }
+      ))
       return
     }
 
-    console.log()
-    console.log(chalk.bold('🔍 Potentially Unused Dependencies'))
-    console.log(chalk.gray(`   ${resolvedPath}`))
-    console.log()
+    printHeader('UNUSED DEPENDENCIES', resolvedPath)
 
     const table = new Table({
       head: [
-        chalk.gray('Type'),
-        chalk.gray('Package'),
-        chalk.gray('Version'),
-        chalk.gray('Size'),
+        chalk.cyan(''),
+        chalk.cyan('Package'),
+        chalk.cyan('Version'),
+        chalk.cyan('Size'),
       ],
       chars: {
-        'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
-        'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
-        'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
-        'right': '', 'right-mid': '', 'middle': ' ',
+        'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+        'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+        'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+        'right': '│', 'right-mid': '┤', 'middle': '│',
       },
       style: { 'padding-left': 1, 'padding-right': 1 },
+      colWidths: [4, 35, 12, 12],
     })
 
     for (const dep of unusedDeps) {
-      const typeIcon = dep.type === 'prod' ? chalk.green('●') : chalk.blue('●')
+      const typeIcon = dep.type === 'prod' ? chalk.green(figures.circleFilled) : chalk.blue(figures.circleFilled)
       table.push([
         typeIcon,
         chalk.yellow(dep.name),
@@ -673,22 +707,26 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     const prodUnused = unusedDeps.filter(d => d.type === 'prod')
     const devUnused = unusedDeps.filter(d => d.type === 'dev')
 
-    console.log()
-    console.log(chalk.gray('─'.repeat(60)))
-    console.log()
-    console.log(chalk.bold('   Summary:'))
-    console.log(`     ${chalk.yellow('⚠')} ${unusedDeps.length} potentially unused dependencies`)
+    const summaryLines: string[] = []
+    summaryLines.push(warnGradient(`${figures.warning} ${unusedDeps.length} potentially unused dependencies`))
+    summaryLines.push('')
     if (prodUnused.length > 0) {
-      console.log(`     ${chalk.green('●')} ${prodUnused.length} production deps (${formatSize(prodUnused.reduce((s, d) => s + d.size, 0))})`)
+      summaryLines.push(`  ${chalk.green(figures.circleFilled)} ${prodUnused.length} production  ${chalk.gray(`(${formatSize(prodUnused.reduce((s, d) => s + d.size, 0))})`)}`)
     }
     if (devUnused.length > 0) {
-      console.log(`     ${chalk.blue('●')} ${devUnused.length} dev deps (${formatSize(devUnused.reduce((s, d) => s + d.size, 0))})`)
+      summaryLines.push(`  ${chalk.blue(figures.circleFilled)} ${devUnused.length} development ${chalk.gray(`(${formatSize(devUnused.reduce((s, d) => s + d.size, 0))})`)}`)
     }
-    console.log(`     ${chalk.red('✗')} Potential savings: ${chalk.red(formatSize(totalUnusedSize))}`)
-    console.log()
-    console.log(chalk.gray('   Note: This is a static analysis. Some dependencies may be'))
-    console.log(chalk.gray('   used dynamically or in config files. Verify before removing.'))
-    console.log()
+    summaryLines.push('')
+    summaryLines.push(chalk.red(`${figures.cross} Potential savings: ${formatSize(totalUnusedSize)}`))
+    summaryLines.push('')
+    summaryLines.push(chalk.gray.italic('Note: Static analysis only. Verify before removing.'))
+
+    console.log(boxen(summaryLines.join('\n'), {
+      padding: 1,
+      margin: { top: 1, bottom: 1, left: 2, right: 2 },
+      borderStyle: 'round',
+      borderColor: 'yellow',
+    }))
     return
   }
 
@@ -705,17 +743,19 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (treeNodes.length === 0) {
-      console.log(chalk.yellow(`\n  ${packageName ? `Package "${packageName}" not found` : 'No dependencies found'}\n`))
+      console.log(boxen(
+        chalk.yellow(`${figures.warning} ${packageName ? `Package "${packageName}" not found` : 'No dependencies found'}`),
+        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'yellow' }
+      ))
       return
     }
 
-    console.log()
-    console.log(chalk.bold('🌳 Dependency Tree'))
-    console.log(chalk.gray(`   ${resolvedPath}`))
-    if (packageName) {
-      console.log(chalk.cyan(`   Package: ${packageName}`))
-    }
-    console.log(chalk.gray(`   Max depth: ${depth}`))
+    const treeSubtitle = packageName
+      ? `${resolvedPath}  ${chalk.cyan(figures.arrowRight)}  ${packageName}`
+      : resolvedPath
+    printHeader('DEPENDENCY TREE', treeSubtitle)
+
+    console.log(chalk.gray(`  Max depth: ${depth}`))
     console.log()
 
     printTree(treeNodes)
@@ -734,37 +774,38 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     }
 
     if (dups.length === 0) {
-      console.log(chalk.green('\n  No duplicate packages found!\n'))
+      console.log(boxen(
+        chalk.green(`${figures.tick} No duplicate packages found!`),
+        { padding: 1, margin: 1, borderStyle: 'round', borderColor: 'green' }
+      ))
       return
     }
 
-    console.log()
-    console.log(chalk.bold('📦 Duplicate Packages (multiple versions)'))
-    console.log(chalk.gray(`   ${resolvedPath}`))
-    console.log()
+    printHeader('DUPLICATE PACKAGES', resolvedPath)
 
     const table = new Table({
       head: [
-        chalk.gray('Package'),
-        chalk.gray('Versions'),
-        chalk.gray('Total Size'),
+        chalk.cyan('Package'),
+        chalk.cyan('Versions'),
+        chalk.cyan('Total'),
       ],
       chars: {
-        'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
-        'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
-        'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
-        'right': '', 'right-mid': '', 'middle': ' ',
+        'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+        'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+        'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+        'right': '│', 'right-mid': '┤', 'middle': '│',
       },
       style: { 'padding-left': 1, 'padding-right': 1 },
+      colWidths: [25, 40, 12],
     })
 
     for (const dup of dups.slice(0, top)) {
       const versionsStr = dup.versions
-        .map(v => `${v.version} (${formatSize(v.size)})`)
-        .join(', ')
+        .map(v => `${v.version} ${chalk.gray(`(${formatSize(v.size)})`)}`)
+        .join(chalk.gray(' | '))
       table.push([
         chalk.yellow(dup.name),
-        chalk.gray(versionsStr),
+        versionsStr,
         colorSize(dup.totalSize, formatSize(dup.totalSize)),
       ])
     }
@@ -776,13 +817,17 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
       return sum + sizes.slice(1).reduce((s, sz) => s + sz, 0)
     }, 0)
 
-    console.log()
-    console.log(chalk.gray('─'.repeat(60)))
-    console.log()
-    console.log(chalk.bold('   Summary:'))
-    console.log(`     ${chalk.yellow('⚠')} ${dups.length} packages have multiple versions`)
-    console.log(`     ${chalk.red('✗')} Potential wasted space: ${chalk.red(formatSize(wastedSize))}`)
-    console.log()
+    const summaryLines: string[] = []
+    summaryLines.push(warnGradient(`${figures.warning} ${dups.length} packages have multiple versions`))
+    summaryLines.push('')
+    summaryLines.push(chalk.red(`${figures.cross} Potential wasted space: ${formatSize(wastedSize)}`))
+
+    console.log(boxen(summaryLines.join('\n'), {
+      padding: 1,
+      margin: { top: 1, bottom: 1, left: 2, right: 2 },
+      borderStyle: 'round',
+      borderColor: 'yellow',
+    }))
     return
   }
 
@@ -817,38 +862,45 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     return
   }
 
-  console.log()
-  console.log(chalk.bold('📦 Dependency Size Analysis'))
-  console.log(chalk.gray(`   ${resolvedPath}`))
-  if (type !== 'all') {
-    console.log(chalk.cyan(`   Filtered: ${type} only`))
-  }
-  if (sort !== 'size') {
-    console.log(chalk.cyan(`   Sorted by: ${sort}`))
-  }
+  // Build filter/sort info
+  const filterInfo: string[] = []
+  if (type !== 'all') filterInfo.push(`type: ${type}`)
+  if (sort !== 'size') filterInfo.push(`sort: ${sort}`)
+  const subtitle = filterInfo.length > 0
+    ? `${resolvedPath}  ${chalk.cyan(figures.arrowRight)}  ${filterInfo.join(', ')}`
+    : resolvedPath
+
+  printHeader('DEPENDENCY SIZE ANALYSIS', subtitle)
+
+  // Legend
+  console.log(chalk.gray('  Legend: ') +
+    chalk.green(figures.circleFilled + ' prod') + '  ' +
+    chalk.blue(figures.circleFilled + ' dev') + '  ' +
+    chalk.gray(figures.circle + ' transitive') + '    ' +
+    chalk.gray('Size: ') +
+    chalk.green('■') + chalk.gray('<100KB ') +
+    chalk.white('■') + chalk.gray('<1MB ') +
+    chalk.yellow('■') + chalk.gray('<5MB ') +
+    chalk.red('■') + chalk.gray('>5MB'))
   console.log()
 
-  console.log(chalk.gray('   Legend: ') +
-    chalk.green('● prod') + '  ' +
-    chalk.blue('● dev') + '  ' +
-    chalk.gray('○ transitive'))
-  console.log()
-
+  // Table with better styling
   const table = new Table({
     head: [
-      chalk.gray('Type'),
-      chalk.gray('Package'),
-      chalk.gray('Version'),
-      chalk.gray('Size'),
-      chalk.gray(''),
+      chalk.cyan(''),
+      chalk.cyan('Package'),
+      chalk.cyan('Version'),
+      chalk.cyan('Size'),
+      chalk.cyan(''),
     ],
     chars: {
-      'top': '', 'top-mid': '', 'top-left': '', 'top-right': '',
-      'bottom': '', 'bottom-mid': '', 'bottom-left': '', 'bottom-right': '',
-      'left': ' ', 'left-mid': '', 'mid': '', 'mid-mid': '',
-      'right': '', 'right-mid': '', 'middle': ' ',
+      'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+      'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+      'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+      'right': '│', 'right-mid': '┤', 'middle': '│',
     },
-    style: { 'padding-left': 1, 'padding-right': 1 },
+    style: { 'padding-left': 1, 'padding-right': 1, head: ['cyan'] },
+    colWidths: [4, 35, 12, 12, 24],
   })
 
   const topPackages = packages.slice(0, top)
@@ -857,7 +909,7 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     const sizeStr = formatSize(pkg.size)
     table.push([
       getTypeIcon(pkg.type),
-      chalk.white(pkg.name),
+      chalk.white(pkg.name.length > 32 ? pkg.name.slice(0, 29) + '...' : pkg.name),
       chalk.gray(pkg.version),
       colorSize(pkg.size, sizeStr.padStart(10)),
       createBar(pkg.size / maxSize),
@@ -866,32 +918,22 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
   console.log(table.toString())
 
-  console.log()
-  console.log(chalk.gray('─'.repeat(60)))
-  console.log()
-
-  console.log(
-    chalk.bold('   Total: ') + chalk.white(formatSize(totalSize)) +
-    chalk.gray(' in ') + chalk.white(packages.length) + chalk.gray(' packages')
-  )
-  console.log()
+  // Summary box
+  const summaryLines: string[] = []
+  summaryLines.push(chalk.bold(`${figures.info} Total: `) + chalk.white.bold(formatSize(totalSize)) + chalk.gray(` in ${packages.length} packages`))
+  summaryLines.push('')
 
   if (type === 'all') {
-    console.log(chalk.gray('   Breakdown:'))
-    console.log(
-      `     ${chalk.green('●')} Production:  ${chalk.white(formatSize(typeSizes.prod).padStart(10))}  ${chalk.gray(`(${typeCounts.prod} packages)`)}`
-    )
-    console.log(
-      `     ${chalk.blue('●')} Development: ${chalk.white(formatSize(typeSizes.dev).padStart(10))}  ${chalk.gray(`(${typeCounts.dev} packages)`)}`
-    )
-    console.log(
-      `     ${chalk.gray('○')} Transitive:  ${chalk.white(formatSize(typeSizes.transitive).padStart(10))}  ${chalk.gray(`(${typeCounts.transitive} packages)`)}`
-    )
+    summaryLines.push(chalk.gray('Breakdown by type:'))
+    summaryLines.push(`  ${chalk.green(figures.circleFilled)} Production:  ${chalk.white(formatSize(typeSizes.prod).padStart(10))}  ${chalk.gray(`(${typeCounts.prod} pkgs)`)}`)
+    summaryLines.push(`  ${chalk.blue(figures.circleFilled)} Development: ${chalk.white(formatSize(typeSizes.dev).padStart(10))}  ${chalk.gray(`(${typeCounts.dev} pkgs)`)}`)
+    summaryLines.push(`  ${chalk.gray(figures.circle)} Transitive:  ${chalk.white(formatSize(typeSizes.transitive).padStart(10))}  ${chalk.gray(`(${typeCounts.transitive} pkgs)`)}`)
   }
 
   if (packages.length > top) {
-    console.log()
-    console.log(chalk.gray(`   Showing top ${top} of ${packages.length}. Use --top to see more.`))
+    summaryLines.push('')
+    summaryLines.push(chalk.gray(`Showing top ${top} of ${packages.length}. Use ${chalk.cyan('--top')} to see more.`))
   }
-  console.log()
+
+  printSummaryBox(summaryLines)
 }
