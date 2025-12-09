@@ -33,6 +33,9 @@ interface AnalyzeOptions {
   tree?: string | boolean
   depth?: number
   unused?: boolean
+  outdated?: boolean
+  security?: boolean
+  compare?: string
   filter?: string
   interactive?: boolean
   json?: boolean
@@ -922,6 +925,185 @@ function findUnused(
   return unused.sort((a, b) => b.size - a.size)
 }
 
+interface OutdatedInfo {
+  name: string
+  current: string
+  wanted: string
+  latest: string
+  type: 'prod' | 'dev'
+}
+
+/**
+ * Check for outdated dependencies using npm outdated
+ */
+async function checkOutdated(projectPath: string): Promise<OutdatedInfo[]> {
+  const { spawn } = await import('node:child_process')
+
+  return new Promise((resolve) => {
+    const outdated: OutdatedInfo[] = []
+
+    // Read package.json to know which are prod vs dev deps
+    const pkgJsonPath = path.join(projectPath, 'package.json')
+    let prodDeps: Set<string> = new Set()
+    let devDeps: Set<string> = new Set()
+
+    try {
+      const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+      if (pkgJson.dependencies) prodDeps = new Set(Object.keys(pkgJson.dependencies))
+      if (pkgJson.devDependencies) devDeps = new Set(Object.keys(pkgJson.devDependencies))
+    } catch {
+      // Ignore errors
+    }
+
+    const proc = spawn('npm', ['outdated', '--json'], {
+      cwd: projectPath,
+      shell: true,
+    })
+
+    let output = ''
+    proc.stdout?.on('data', (data) => {
+      output += data.toString()
+    })
+
+    proc.on('close', () => {
+      try {
+        if (output.trim()) {
+          const data = JSON.parse(output)
+          for (const [name, info] of Object.entries(data)) {
+            const pkgInfo = info as { current?: string; wanted?: string; latest?: string }
+            if (pkgInfo.current && pkgInfo.latest && pkgInfo.current !== pkgInfo.latest) {
+              outdated.push({
+                name,
+                current: pkgInfo.current || 'unknown',
+                wanted: pkgInfo.wanted || pkgInfo.current || 'unknown',
+                latest: pkgInfo.latest || 'unknown',
+                type: prodDeps.has(name) ? 'prod' : devDeps.has(name) ? 'dev' : 'prod',
+              })
+            }
+          }
+        }
+      } catch {
+        // JSON parse error, ignore
+      }
+      resolve(outdated)
+    })
+
+    proc.on('error', () => {
+      resolve([])
+    })
+  })
+}
+
+interface SecurityVulnerability {
+  name: string
+  severity: 'info' | 'low' | 'moderate' | 'high' | 'critical'
+  title: string
+  url: string
+  fixAvailable: boolean
+}
+
+/**
+ * Run npm audit for security vulnerabilities
+ */
+async function checkSecurity(projectPath: string): Promise<SecurityVulnerability[]> {
+  const { spawn } = await import('node:child_process')
+
+  return new Promise((resolve) => {
+    const vulnerabilities: SecurityVulnerability[] = []
+
+    const proc = spawn('npm', ['audit', '--json'], {
+      cwd: projectPath,
+      shell: true,
+    })
+
+    let output = ''
+    proc.stdout?.on('data', (data) => {
+      output += data.toString()
+    })
+
+    proc.on('close', () => {
+      try {
+        if (output.trim()) {
+          const data = JSON.parse(output)
+          if (data.vulnerabilities) {
+            for (const [name, info] of Object.entries(data.vulnerabilities)) {
+              const vulnInfo = info as {
+                severity?: string
+                via?: Array<{ title?: string; url?: string } | string>
+                fixAvailable?: boolean | { name: string }
+              }
+              // Get the first vulnerability detail
+              const via = vulnInfo.via?.[0]
+              const title = typeof via === 'object' ? via.title : String(via)
+              const url = typeof via === 'object' ? via.url : ''
+
+              vulnerabilities.push({
+                name,
+                severity: (vulnInfo.severity as SecurityVulnerability['severity']) || 'info',
+                title: title || 'Unknown vulnerability',
+                url: url || '',
+                fixAvailable: !!vulnInfo.fixAvailable,
+              })
+            }
+          }
+        }
+      } catch {
+        // JSON parse error, ignore
+      }
+      resolve(vulnerabilities)
+    })
+
+    proc.on('error', () => {
+      resolve([])
+    })
+  })
+}
+
+interface CompareResult {
+  onlyInFirst: Array<{ name: string; version: string }>
+  onlyInSecond: Array<{ name: string; version: string }>
+  versionDiff: Array<{ name: string; version1: string; version2: string }>
+  same: number
+}
+
+/**
+ * Compare dependencies between two projects
+ */
+function compareDependencies(packages1: PackageInfo[], packages2: PackageInfo[]): CompareResult {
+  const map1 = new Map(packages1.map((p) => [p.name, p.version]))
+  const map2 = new Map(packages2.map((p) => [p.name, p.version]))
+
+  const onlyInFirst: Array<{ name: string; version: string }> = []
+  const onlyInSecond: Array<{ name: string; version: string }> = []
+  const versionDiff: Array<{ name: string; version1: string; version2: string }> = []
+  let same = 0
+
+  // Check packages in first project
+  for (const [name, version] of map1) {
+    if (!map2.has(name)) {
+      onlyInFirst.push({ name, version })
+    } else if (map2.get(name) !== version) {
+      versionDiff.push({ name, version1: version, version2: map2.get(name)! })
+    } else {
+      same++
+    }
+  }
+
+  // Check packages only in second project
+  for (const [name, version] of map2) {
+    if (!map1.has(name)) {
+      onlyInSecond.push({ name, version })
+    }
+  }
+
+  return {
+    onlyInFirst: onlyInFirst.sort((a, b) => a.name.localeCompare(b.name)),
+    onlyInSecond: onlyInSecond.sort((a, b) => a.name.localeCompare(b.name)),
+    versionDiff: versionDiff.sort((a, b) => a.name.localeCompare(b.name)),
+    same,
+  }
+}
+
 /**
  * Interactive mode menu
  */
@@ -1065,6 +1247,9 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     tree = false,
     depth = 3,
     unused = false,
+    outdated = false,
+    security = false,
+    compare,
     filter,
     interactive = false,
     json = false,
@@ -1087,6 +1272,287 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
   // Handle interactive mode
   if (interactive) {
     await runInteractiveMode(projectPath)
+    return
+  }
+
+  // Handle outdated mode
+  if (outdated) {
+    const spinner = ora({ text: 'Checking for outdated packages...', spinner: 'dots' }).start()
+    const outdatedPkgs = await checkOutdated(resolvedPath)
+    spinner.succeed(`Checked for outdated packages`)
+
+    if (json) {
+      console.log(JSON.stringify({ outdated: outdatedPkgs }, null, 2))
+      return
+    }
+
+    if (outdatedPkgs.length === 0) {
+      console.log(
+        boxen(chalk.green(`${figures.tick} All dependencies are up to date!`), {
+          padding: 1,
+          margin: 1,
+          borderStyle: 'round',
+          borderColor: 'green',
+        })
+      )
+      return
+    }
+
+    printHeader('OUTDATED DEPENDENCIES', resolvedPath)
+
+    const table = new Table({
+      head: [
+        chalk.cyan(''),
+        chalk.cyan('Package'),
+        chalk.cyan('Current'),
+        chalk.cyan('Wanted'),
+        chalk.cyan('Latest'),
+      ],
+      chars: {
+        top: '─',
+        'top-mid': '┬',
+        'top-left': '┌',
+        'top-right': '┐',
+        bottom: '─',
+        'bottom-mid': '┴',
+        'bottom-left': '└',
+        'bottom-right': '┘',
+        left: '│',
+        'left-mid': '├',
+        mid: '─',
+        'mid-mid': '┼',
+        right: '│',
+        'right-mid': '┤',
+        middle: '│',
+      },
+      style: { 'padding-left': 1, 'padding-right': 1 },
+      colWidths: [4, 30, 12, 12, 12],
+    })
+
+    for (const pkg of outdatedPkgs) {
+      const typeIcon =
+        pkg.type === 'prod' ? chalk.green(figures.circleFilled) : chalk.blue(figures.circleFilled)
+      const isBreaking = pkg.current.split('.')[0] !== pkg.latest.split('.')[0]
+      table.push([
+        typeIcon,
+        chalk.bold.yellow(pkg.name),
+        chalk.gray(pkg.current),
+        chalk.cyan(pkg.wanted),
+        isBreaking ? chalk.red.bold(pkg.latest) : chalk.green(pkg.latest),
+      ])
+    }
+
+    console.log(table.toString())
+
+    const prodOutdated = outdatedPkgs.filter((p) => p.type === 'prod')
+    const devOutdated = outdatedPkgs.filter((p) => p.type === 'dev')
+
+    const summaryLines: string[] = []
+    summaryLines.push(warnGradient(`${figures.warning} ${outdatedPkgs.length} outdated packages`))
+    summaryLines.push('')
+    if (prodOutdated.length > 0) {
+      summaryLines.push(`  ${chalk.green(figures.circleFilled)} ${prodOutdated.length} production`)
+    }
+    if (devOutdated.length > 0) {
+      summaryLines.push(`  ${chalk.blue(figures.circleFilled)} ${devOutdated.length} development`)
+    }
+    summaryLines.push('')
+    summaryLines.push(chalk.gray(`Run ${chalk.cyan('npm update')} to update to wanted versions`))
+    summaryLines.push(
+      chalk.gray(`Run ${chalk.cyan('npm install <pkg>@latest')} to update to latest`)
+    )
+
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: 'yellow',
+      })
+    )
+    return
+  }
+
+  // Handle security mode
+  if (security) {
+    const spinner = ora({ text: 'Running security audit...', spinner: 'dots' }).start()
+    const vulnerabilities = await checkSecurity(resolvedPath)
+    spinner.succeed(`Completed security audit`)
+
+    if (json) {
+      console.log(JSON.stringify({ vulnerabilities }, null, 2))
+      return
+    }
+
+    if (vulnerabilities.length === 0) {
+      console.log(
+        boxen(chalk.green(`${figures.tick} No security vulnerabilities found!`), {
+          padding: 1,
+          margin: 1,
+          borderStyle: 'round',
+          borderColor: 'green',
+        })
+      )
+      return
+    }
+
+    printHeader('SECURITY VULNERABILITIES', resolvedPath)
+
+    const severityColors: Record<string, (s: string) => string> = {
+      critical: chalk.bgRed.white.bold,
+      high: chalk.red.bold,
+      moderate: chalk.yellow,
+      low: chalk.blue,
+      info: chalk.gray,
+    }
+
+    const table = new Table({
+      head: [chalk.cyan('Severity'), chalk.cyan('Package'), chalk.cyan('Issue'), chalk.cyan('Fix')],
+      chars: {
+        top: '─',
+        'top-mid': '┬',
+        'top-left': '┌',
+        'top-right': '┐',
+        bottom: '─',
+        'bottom-mid': '┴',
+        'bottom-left': '└',
+        'bottom-right': '┘',
+        left: '│',
+        'left-mid': '├',
+        mid: '─',
+        'mid-mid': '┼',
+        right: '│',
+        'right-mid': '┤',
+        middle: '│',
+      },
+      style: { 'padding-left': 1, 'padding-right': 1 },
+      colWidths: [12, 25, 35, 8],
+    })
+
+    // Sort by severity
+    const severityOrder = ['critical', 'high', 'moderate', 'low', 'info']
+    vulnerabilities.sort(
+      (a, b) => severityOrder.indexOf(a.severity) - severityOrder.indexOf(b.severity)
+    )
+
+    for (const vuln of vulnerabilities) {
+      const colorFn = severityColors[vuln.severity] || chalk.white
+      table.push([
+        colorFn(vuln.severity.toUpperCase()),
+        chalk.yellow(vuln.name),
+        vuln.title.substring(0, 33),
+        vuln.fixAvailable ? chalk.green(figures.tick) : chalk.red(figures.cross),
+      ])
+    }
+
+    console.log(table.toString())
+
+    const critical = vulnerabilities.filter((v) => v.severity === 'critical').length
+    const high = vulnerabilities.filter((v) => v.severity === 'high').length
+    const fixable = vulnerabilities.filter((v) => v.fixAvailable).length
+
+    const summaryLines: string[] = []
+    summaryLines.push(
+      chalk.red.bold(`${figures.warning} ${vulnerabilities.length} vulnerabilities found`)
+    )
+    summaryLines.push('')
+    if (critical > 0) summaryLines.push(`  ${chalk.bgRed.white.bold(' CRITICAL ')} ${critical}`)
+    if (high > 0) summaryLines.push(`  ${chalk.red.bold('HIGH')}      ${high}`)
+    summaryLines.push('')
+    summaryLines.push(`  ${chalk.green(figures.tick)} ${fixable} can be fixed automatically`)
+    summaryLines.push('')
+    summaryLines.push(chalk.gray(`Run ${chalk.cyan('npm audit fix')} to fix automatically`))
+
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: 'red',
+      })
+    )
+    return
+  }
+
+  // Handle compare mode
+  if (compare) {
+    const comparePath = path.resolve(compare)
+    const compareNodeModules = path.join(comparePath, 'node_modules')
+
+    if (!fs.existsSync(compareNodeModules)) {
+      console.log(chalk.red(`${figures.cross} node_modules not found at ${comparePath}`))
+      return
+    }
+
+    const spinner = ora({ text: 'Comparing dependencies...', spinner: 'dots' }).start()
+
+    const deps1 = getProjectDeps(resolvedPath)
+    const deps2 = getProjectDeps(comparePath)
+    const packages1 = getPackagesFromNodeModules(resolvedPath, deps1, spinner)
+    spinner.text = 'Scanning second project...'
+    const packages2 = getPackagesFromNodeModules(comparePath, deps2, spinner)
+
+    const result = compareDependencies(packages1, packages2)
+    spinner.succeed(`Compared ${packages1.length} vs ${packages2.length} packages`)
+
+    if (json) {
+      console.log(JSON.stringify({ compare: result }, null, 2))
+      return
+    }
+
+    printHeader('DEPENDENCY COMPARISON', `${resolvedPath} vs ${comparePath}`)
+
+    // Only in first project
+    if (result.onlyInFirst.length > 0) {
+      console.log(chalk.cyan.bold(`\n  Only in ${path.basename(resolvedPath)}:`))
+      for (const pkg of result.onlyInFirst.slice(0, 15)) {
+        console.log(`    ${chalk.green('+')} ${pkg.name}@${chalk.gray(pkg.version)}`)
+      }
+      if (result.onlyInFirst.length > 15) {
+        console.log(chalk.gray(`    ... and ${result.onlyInFirst.length - 15} more`))
+      }
+    }
+
+    // Only in second project
+    if (result.onlyInSecond.length > 0) {
+      console.log(chalk.cyan.bold(`\n  Only in ${path.basename(comparePath)}:`))
+      for (const pkg of result.onlyInSecond.slice(0, 15)) {
+        console.log(`    ${chalk.red('-')} ${pkg.name}@${chalk.gray(pkg.version)}`)
+      }
+      if (result.onlyInSecond.length > 15) {
+        console.log(chalk.gray(`    ... and ${result.onlyInSecond.length - 15} more`))
+      }
+    }
+
+    // Version differences
+    if (result.versionDiff.length > 0) {
+      console.log(chalk.cyan.bold(`\n  Version differences:`))
+      for (const pkg of result.versionDiff.slice(0, 15)) {
+        console.log(
+          `    ${chalk.yellow('~')} ${pkg.name}: ${chalk.red(pkg.version1)} → ${chalk.green(pkg.version2)}`
+        )
+      }
+      if (result.versionDiff.length > 15) {
+        console.log(chalk.gray(`    ... and ${result.versionDiff.length - 15} more`))
+      }
+    }
+
+    const summaryLines: string[] = []
+    summaryLines.push(chalk.bold(`${figures.info} Comparison Summary`))
+    summaryLines.push('')
+    summaryLines.push(`  ${chalk.green('+')} Only in first:  ${result.onlyInFirst.length}`)
+    summaryLines.push(`  ${chalk.red('-')} Only in second: ${result.onlyInSecond.length}`)
+    summaryLines.push(`  ${chalk.yellow('~')} Different versions: ${result.versionDiff.length}`)
+    summaryLines.push(`  ${chalk.gray('=')} Same: ${result.same}`)
+
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: 'cyan',
+      })
+    )
     return
   }
 

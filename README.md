@@ -5,6 +5,8 @@
 [![Node.js](https://img.shields.io/node/v/@tt-a1i/pkg-analyzer.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+English | [中文](./README.zh-CN.md)
+
 A powerful CLI tool to analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, and export reports for AI-powered optimization suggestions.
 
 ## Features
@@ -62,6 +64,9 @@ pkg-analyzer [path] [options]
 | `--sort <field>` | `-s` | Sort by: size, name, type |
 | `--duplicates` | `-d` | Show duplicate packages |
 | `--unused` | `-u` | Detect unused dependencies |
+| `--outdated` | `-o` | Show outdated dependencies |
+| `--security` | | Run security audit |
+| `--compare <path>` | | Compare with another project |
 | `--tree [pkg]` | | Show dependency tree |
 | `--depth <n>` | | Max depth for tree view (default: 3) |
 | `--filter <keyword>` | `-f` | Filter packages by name |
@@ -96,6 +101,19 @@ pkg-analyzer --unused
 
 # Search for specific packages
 pkg-analyzer --filter react
+```
+
+### Updates & Security
+
+```bash
+# Show outdated dependencies
+pkg-analyzer --outdated
+
+# Run security audit
+pkg-analyzer --security
+
+# Compare with another project
+pkg-analyzer --compare ../other-project
 ```
 
 ### Dependency Tree

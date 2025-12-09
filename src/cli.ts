@@ -7,7 +7,7 @@ const program = new Command()
 program
   .name('pkg-analyzer')
   .description('Analyze node_modules dependencies size')
-  .version('0.1.0')
+  .version('0.2.0')
   .argument('[path]', 'Project path to analyze', '.')
   .option('-n, --top <number>', 'Show top N largest packages', '10')
   .option('-t, --type <type>', 'Filter by type: prod, dev, transitive, all', 'all')
@@ -16,6 +16,9 @@ program
   .option('--tree [package]', 'Show dependency tree (optionally for specific package)')
   .option('--depth <number>', 'Max depth for tree view', '3')
   .option('-u, --unused', 'Detect unused dependencies')
+  .option('-o, --outdated', 'Show outdated dependencies')
+  .option('--security', 'Run security audit (npm audit)')
+  .option('--compare <path>', 'Compare dependencies with another project')
   .option('-f, --filter <keyword>', 'Filter packages by name')
   .option('-i, --interactive', 'Interactive mode with keyboard navigation')
   .option('--json', 'Output as JSON')
@@ -32,6 +35,9 @@ program
         tree?: string | boolean
         depth: string
         unused: boolean
+        outdated: boolean
+        security: boolean
+        compare?: string
         filter?: string
         interactive: boolean
         json: boolean
@@ -47,6 +53,9 @@ program
         tree: options.tree,
         depth: parseInt(options.depth, 10),
         unused: options.unused,
+        outdated: options.outdated,
+        security: options.security,
+        compare: options.compare,
         filter: options.filter,
         interactive: options.interactive,
         json: options.json,

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2024-12-10
+
+### Added
+- `--outdated` option to show outdated dependencies
+- `--security` option to run npm audit security check
+- `--compare <path>` option to compare dependencies with another project
+- Chinese README (README.zh-CN.md)
+- ESLint + Prettier for code formatting
+- CONTRIBUTING.md with development guide
+- GitHub issue and PR templates
+
 ## [0.2.0] - 2024-12-09
 
 ### Added
@@ -34,5 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for npm, yarn, and pnpm package managers
 - Cross-platform support (macOS, Linux, Windows)
 
+[0.3.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.1.0
