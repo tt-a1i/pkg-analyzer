@@ -1,0 +1,48 @@
+{
+  "name": "pkg-analyzer",
+  "version": "0.1.0",
+  "description": "Analyze node_modules dependencies size and visualize in terminal",
+  "type": "module",
+  "bin": {
+    "pkg-analyzer": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "npm",
+    "pnpm",
+    "dependencies",
+    "analyzer",
+    "size",
+    "node_modules"
+  ],
+  "author": "tt-a1i",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tt-a1i/pkg-analyzer.git"
+  },
+  "homepage": "https://github.com/tt-a1i/pkg-analyzer#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "yaml": "^2.3.0"
+  }
+}
