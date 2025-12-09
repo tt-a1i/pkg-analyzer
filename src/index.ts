@@ -429,8 +429,22 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
 
   const packageManager = detectPackageManager(projectPath)
   spinner.text = `Scanning packages (${packageManager})...`
+  const startTime = Date.now()
 
   const packages: PackageInfo[] = []
+
+  // Progress bar characters
+  const progressBar = (current: number, total: number, width: number = 20): string => {
+    const percent = Math.round((current / total) * 100)
+    const filled = Math.round((current / total) * width)
+    const empty = width - filled
+    return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${percent}%`
+  }
+
+  const elapsed = (): string => {
+    const seconds = ((Date.now() - startTime) / 1000).toFixed(1)
+    return `${seconds}s`
+  }
 
   if (packageManager === 'pnpm') {
     // pnpm stores packages in .pnpm directory
@@ -441,14 +455,14 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
     }
 
     const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
-    const total = entries.length
+    const total = entries.filter(e => e.isDirectory()).length
     let processed = 0
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
 
       processed++
-      spinner.text = `Scanning packages (pnpm)... ${processed}/${total}`
+      spinner.text = `Scanning packages (pnpm) ${progressBar(processed, total)} ${processed}/${total}`
 
       const dirName = entry.name
       let name: string
@@ -508,7 +522,7 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
               const key = `${info.name}@${info.version}`
               if (!seen.has(key)) {
                 seen.set(key, info)
-                spinner.text = `Scanning packages (${packageManager})... ${seen.size} found`
+                spinner.text = `Scanning packages (${packageManager})... ${seen.size} found (${elapsed()})`
               }
             }
 
@@ -523,7 +537,7 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
             const key = `${info.name}@${info.version}`
             if (!seen.has(key)) {
               seen.set(key, info)
-              spinner.text = `Scanning packages (${packageManager})... ${seen.size} found`
+              spinner.text = `Scanning packages (${packageManager})... ${seen.size} found (${elapsed()})`
             }
           }
 

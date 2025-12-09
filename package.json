@@ -1,6 +1,6 @@
 {
   "name": "@tt-a1i/pkg-analyzer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, export reports for AI optimization",
   "type": "module",
   "bin": {
