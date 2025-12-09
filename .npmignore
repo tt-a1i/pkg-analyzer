@@ -1,0 +1,17 @@
+# Source
+src/
+tests/
+
+# Config
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.github/
+
+# Dev files
+*.log
+.DS_Store
+node_modules/
+
+# Test artifacts
+test-export.*

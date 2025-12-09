@@ -1,13 +1,19 @@
 {
   "name": "pkg-analyzer",
   "version": "0.1.0",
-  "description": "Analyze node_modules dependencies size and visualize in terminal",
+  "description": "Analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, export reports for AI optimization",
   "type": "module",
   "bin": {
     "pkg-analyzer": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -15,21 +21,34 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm build && pnpm test"
   },
   "keywords": [
     "npm",
     "pnpm",
+    "yarn",
     "dependencies",
     "analyzer",
     "size",
-    "node_modules"
+    "node_modules",
+    "cli",
+    "devtools",
+    "bundle",
+    "duplicates",
+    "unused"
   ],
   "author": "tt-a1i",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tt-a1i/pkg-analyzer.git"
+    "url": "git+https://github.com/tt-a1i/pkg-analyzer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tt-a1i/pkg-analyzer/issues"
   },
   "homepage": "https://github.com/tt-a1i/pkg-analyzer#readme",
   "engines": {
@@ -38,7 +57,8 @@
   "devDependencies": {
     "@types/node": "^20.10.0",
     "tsup": "^8.0.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.15"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.0.2",

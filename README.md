@@ -1,45 +1,216 @@
 # pkg-analyzer
 
-Analyze node_modules dependencies size and visualize in terminal.
+[![npm version](https://img.shields.io/npm/v/pkg-analyzer.svg)](https://www.npmjs.com/package/pkg-analyzer)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Install
+A powerful CLI tool to analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, and export reports for AI-powered optimization suggestions.
+
+## Features
+
+- **Size Analysis** - Visualize package sizes with colored bars and icons
+- **Duplicate Detection** - Find packages with multiple versions wasting space
+- **Unused Detection** - Identify potentially unused dependencies
+- **Dependency Tree** - View hierarchical dependency relationships
+- **Interactive Mode** - Menu-driven interface for easy exploration
+- **Export Reports** - Export to JSON/Markdown for AI analysis
+- **Clipboard Copy** - Copy reports directly to clipboard
+- **Multi-Package Manager** - Supports npm, yarn, and pnpm
+
+## Installation
 
 ```bash
+# npm
 npm install -g pkg-analyzer
-# or
+
+# pnpm
 pnpm add -g pkg-analyzer
+
+# yarn
+yarn global add pkg-analyzer
+```
+
+## Quick Start
+
+```bash
+# Analyze current project
+pkg-analyzer
+
+# Interactive mode
+pkg-analyzer -i
+
+# Export report for AI analysis
+pkg-analyzer --copy
 ```
 
 ## Usage
 
 ```bash
-# Analyze current directory
-pkg-analyzer
+pkg-analyzer [path] [options]
+```
 
-# Analyze specific path
-pkg-analyzer /path/to/project
+### Options
 
+| Option | Alias | Description |
+|--------|-------|-------------|
+| `--top <n>` | `-n` | Show top N largest packages (default: 10) |
+| `--type <type>` | `-t` | Filter by type: prod, dev, transitive, all |
+| `--sort <field>` | `-s` | Sort by: size, name, type |
+| `--duplicates` | `-d` | Show duplicate packages |
+| `--unused` | `-u` | Detect unused dependencies |
+| `--tree [pkg]` | | Show dependency tree |
+| `--depth <n>` | | Max depth for tree view (default: 3) |
+| `--filter <keyword>` | `-f` | Filter packages by name |
+| `--interactive` | `-i` | Interactive mode |
+| `--export <file>` | `-e` | Export to file (.json or .md) |
+| `--copy` | `-c` | Copy report to clipboard |
+| `--json` | | Output as JSON |
+
+## Examples
+
+### Basic Analysis
+
+```bash
 # Show top 20 largest packages
 pkg-analyzer --top 20
 
-# Output as JSON
-pkg-analyzer --json
+# Show only production dependencies
+pkg-analyzer --type prod
+
+# Sort by name
+pkg-analyzer --sort name
 ```
 
-## Example Output
+### Find Problems
+
+```bash
+# Find duplicate packages (multiple versions)
+pkg-analyzer --duplicates
+
+# Find unused dependencies
+pkg-analyzer --unused
+
+# Search for specific packages
+pkg-analyzer --filter react
+```
+
+### Dependency Tree
+
+```bash
+# Show full dependency tree
+pkg-analyzer --tree
+
+# Show tree for specific package
+pkg-analyzer --tree lodash
+
+# Limit tree depth
+pkg-analyzer --tree --depth 2
+```
+
+### Export & Share
+
+```bash
+# Copy report to clipboard (paste to AI for suggestions)
+pkg-analyzer --copy
+
+# Export to Markdown file
+pkg-analyzer --export report.md
+
+# Export to JSON file
+pkg-analyzer --export report.json
+
+# Both copy and export
+pkg-analyzer --copy --export analysis.md
+```
+
+### Interactive Mode
+
+```bash
+pkg-analyzer -i
+```
+
+Interactive mode provides a menu-driven interface to:
+- Analyze top packages by size
+- Filter by dependency type
+- Search packages by name
+- Find duplicates
+- Detect unused dependencies
+- View dependency tree
+
+## Output Example
 
 ```
-📦 Dependency Size Analysis
+  ╔═══════════════════════════════════════════════════════╗
+  ║  DEPENDENCY SIZE ANALYSIS                             ║
+  ╚═══════════════════════════════════════════════════════╝
+  /path/to/project
 
-typescript        15.2 MB  ████████████████████
-@babel/core        5.3 MB  ███████
-lodash             1.4 MB  ██
-chalk              0.1 MB  ░
+  Legend: ◉ prod  ◉ dev  ◯ transitive    Size: ■<100KB ■<1MB ■<5MB ■>5MB
 
-──────────────────────────────────────────────────
-Total: 42 packages, 25.6 MB
+┌────┬───────────────────────────────────┬────────────┬────────────┬────────────────────────┐
+│    │ Package                           │ Version    │ Size       │                        │
+├────┼───────────────────────────────────┼────────────┼────────────┼────────────────────────┤
+│ ◉  │ typescript                        │ 5.3.0      │    22.5 MB │ ████████████████████   │
+├────┼───────────────────────────────────┼────────────┼────────────┼────────────────────────┤
+│ ◯  │ @esbuild/darwin-arm64             │ 0.19.0     │     9.9 MB │ █████████░░░░░░░░░░░   │
+├────┼───────────────────────────────────┼────────────┼────────────┼────────────────────────┤
+│ ◯  │ rxjs                              │ 7.8.1      │     4.3 MB │ ████░░░░░░░░░░░░░░░░   │
+└────┴───────────────────────────────────┴────────────┴────────────┴────────────────────────┘
+
+  ╭───────────────────────────────────────────╮
+  │                                           │
+  │   ℹ Total: 52.5 MB in 113 packages       │
+  │                                           │
+  │   Breakdown by type:                      │
+  │     ◉ Production:      1.1 MB  (10 pkgs)  │
+  │     ◉ Development:    24.7 MB  (2 pkgs)   │
+  │     ◯ Transitive:     26.7 MB  (101 pkgs) │
+  │                                           │
+  ╰───────────────────────────────────────────╯
 ```
+
+## AI-Powered Optimization
+
+Export a report and paste it to your favorite AI assistant for optimization suggestions:
+
+```bash
+pkg-analyzer --copy
+```
+
+The exported Markdown includes:
+- Complete dependency analysis
+- Duplicate packages with wasted space
+- Potentially unused dependencies
+- A ready-to-use AI prompt asking for optimization suggestions
+
+## Programmatic API
+
+```typescript
+import { analyze } from 'pkg-analyzer'
+
+await analyze('/path/to/project', {
+  top: 20,
+  type: 'prod',
+  duplicates: true,
+  json: true,
+})
+```
+
+## Package Manager Support
+
+| Package Manager | Lock File | Support |
+|-----------------|-----------|---------|
+| npm | package-lock.json | ✅ |
+| yarn | yarn.lock | ✅ |
+| pnpm | pnpm-lock.yaml | ✅ |
+
+## Requirements
+
+- Node.js >= 18
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT
+MIT © [tt-a1i](https://github.com/tt-a1i)
