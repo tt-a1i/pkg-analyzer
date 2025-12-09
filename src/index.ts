@@ -6,6 +6,7 @@ import Table from 'cli-table3'
 import boxen from 'boxen'
 import figures from 'figures'
 import gradient from 'gradient-string'
+import { select, input, confirm, Separator } from '@inquirer/prompts'
 
 // Custom gradient for the tool
 const pkgGradient = gradient(['#00d9ff', '#00ff87'])
@@ -32,6 +33,8 @@ interface AnalyzeOptions {
   tree?: string | boolean
   depth?: number
   unused?: boolean
+  filter?: string
+  interactive?: boolean
   json?: boolean
 }
 
@@ -206,23 +209,49 @@ function getPackageType(name: string, deps: ProjectDeps): PackageInfo['type'] {
   return 'transitive'
 }
 
+type PackageManager = 'pnpm' | 'yarn' | 'npm'
+
 /**
- * Get all packages from node_modules (supports pnpm)
+ * Detect which package manager is used
+ */
+function detectPackageManager(projectPath: string): PackageManager {
+  // Check for lock files
+  if (fs.existsSync(path.join(projectPath, 'pnpm-lock.yaml'))) return 'pnpm'
+  if (fs.existsSync(path.join(projectPath, 'yarn.lock'))) return 'yarn'
+  if (fs.existsSync(path.join(projectPath, 'package-lock.json'))) return 'npm'
+
+  // Check node_modules structure
+  const nodeModulesPath = path.join(projectPath, 'node_modules')
+  if (fs.existsSync(path.join(nodeModulesPath, '.pnpm'))) return 'pnpm'
+  if (fs.existsSync(path.join(nodeModulesPath, '.yarn-integrity'))) return 'yarn'
+
+  return 'npm' // default
+}
+
+/**
+ * Get all packages from node_modules (supports pnpm, yarn, npm)
  */
 function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spinner: ReturnType<typeof ora>): PackageInfo[] {
   const nodeModulesPath = path.join(projectPath, 'node_modules')
 
   if (!fs.existsSync(nodeModulesPath)) {
-    spinner.fail('node_modules not found. Run pnpm install first.')
+    spinner.fail('node_modules not found. Run npm/yarn/pnpm install first.')
     process.exit(1)
   }
 
+  const packageManager = detectPackageManager(projectPath)
+  spinner.text = `Scanning packages (${packageManager})...`
+
   const packages: PackageInfo[] = []
 
-  const pnpmPath = path.join(nodeModulesPath, '.pnpm')
-  const isPnpm = fs.existsSync(pnpmPath)
+  if (packageManager === 'pnpm') {
+    // pnpm stores packages in .pnpm directory
+    const pnpmPath = path.join(nodeModulesPath, '.pnpm')
+    if (!fs.existsSync(pnpmPath)) {
+      spinner.fail('pnpm structure not found.')
+      process.exit(1)
+    }
 
-  if (isPnpm) {
     const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
     const total = entries.length
     let processed = 0
@@ -231,7 +260,7 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
       if (!entry.isDirectory()) continue
 
       processed++
-      spinner.text = `Scanning packages... ${processed}/${total}`
+      spinner.text = `Scanning packages (pnpm)... ${processed}/${total}`
 
       const dirName = entry.name
       let name: string
@@ -262,29 +291,63 @@ function getPackagesFromNodeModules(projectPath: string, deps: ProjectDeps, spin
       }
     }
   } else {
-    const entries = fs.readdirSync(nodeModulesPath, { withFileTypes: true })
+    // npm and yarn use flat/nested node_modules structure
+    // We need to scan recursively to find all packages including nested ones
+    const seen = new Map<string, PackageInfo>() // key: name@version
 
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+    function scanNodeModules(nmPath: string, depth: number = 0) {
+      if (!fs.existsSync(nmPath) || depth > 10) return
 
-      const pkgPath = path.join(nodeModulesPath, entry.name)
+      const entries = fs.readdirSync(nmPath, { withFileTypes: true })
 
-      if (entry.name.startsWith('@')) {
-        const scopedEntries = fs.readdirSync(pkgPath, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue
 
-        for (const scopedEntry of scopedEntries) {
-          if (!scopedEntry.isDirectory()) continue
+        const pkgPath = path.join(nmPath, entry.name)
 
-          const scopedPkgPath = path.join(pkgPath, scopedEntry.name)
-          const name = `${entry.name}/${scopedEntry.name}`
-          const info = getPackageInfo(scopedPkgPath, name, deps)
-          if (info) packages.push(info)
+        if (entry.name.startsWith('@')) {
+          // Scoped package directory
+          const scopedEntries = fs.readdirSync(pkgPath, { withFileTypes: true })
+
+          for (const scopedEntry of scopedEntries) {
+            if (!scopedEntry.isDirectory()) continue
+
+            const scopedPkgPath = path.join(pkgPath, scopedEntry.name)
+            const name = `${entry.name}/${scopedEntry.name}`
+            const info = getPackageInfo(scopedPkgPath, name, deps)
+
+            if (info) {
+              const key = `${info.name}@${info.version}`
+              if (!seen.has(key)) {
+                seen.set(key, info)
+                spinner.text = `Scanning packages (${packageManager})... ${seen.size} found`
+              }
+            }
+
+            // Check for nested node_modules
+            const nestedNm = path.join(scopedPkgPath, 'node_modules')
+            scanNodeModules(nestedNm, depth + 1)
+          }
+        } else {
+          const info = getPackageInfo(pkgPath, entry.name, deps)
+
+          if (info) {
+            const key = `${info.name}@${info.version}`
+            if (!seen.has(key)) {
+              seen.set(key, info)
+              spinner.text = `Scanning packages (${packageManager})... ${seen.size} found`
+            }
+          }
+
+          // Check for nested node_modules
+          const nestedNm = path.join(pkgPath, 'node_modules')
+          scanNodeModules(nestedNm, depth + 1)
         }
-      } else {
-        const info = getPackageInfo(pkgPath, entry.name, deps)
-        if (info) packages.push(info)
       }
     }
+
+    scanNodeModules(nodeModulesPath)
+    packages.push(...seen.values())
   }
 
   return packages
@@ -625,6 +688,138 @@ function findUnused(
 }
 
 /**
+ * Interactive mode menu
+ */
+async function runInteractiveMode(projectPath: string): Promise<void> {
+  const resolvedPath = path.resolve(projectPath)
+
+  // Print interactive header
+  console.clear()
+  console.log(boxen(
+    pkgGradient.multiline([
+      '╔═══════════════════════════════════════════════════════╗',
+      '║         PKG-ANALYZER INTERACTIVE MODE                 ║',
+      '╚═══════════════════════════════════════════════════════╝',
+    ].join('\n')) + '\n\n' + chalk.gray(`  Project: ${resolvedPath}`),
+    {
+      padding: 1,
+      margin: 1,
+      borderStyle: 'double',
+      borderColor: 'cyan',
+    }
+  ))
+
+  while (true) {
+    const action = await select({
+      message: chalk.cyan('What would you like to do?'),
+      choices: [
+        { name: `${chalk.green(figures.play)} Analyze top packages by size`, value: 'top' },
+        { name: `${chalk.blue(figures.circleFilled)} Filter by type (prod/dev/transitive)`, value: 'type' },
+        { name: `${chalk.magenta(figures.pointer)} Search packages by name`, value: 'search' },
+        { name: `${chalk.yellow(figures.warning)} Find duplicate packages`, value: 'duplicates' },
+        { name: `${chalk.red(figures.cross)} Detect unused dependencies`, value: 'unused' },
+        { name: `${chalk.cyan(figures.nodejs)} View dependency tree`, value: 'tree' },
+        new Separator(),
+        { name: `${chalk.gray(figures.cross)} Exit`, value: 'exit' },
+      ],
+    })
+
+    if (action === 'exit') {
+      console.log(chalk.gray('\n  Goodbye! 👋\n'))
+      break
+    }
+
+    if (action === 'top') {
+      const count = await select({
+        message: 'How many packages to show?',
+        choices: [
+          { name: 'Top 5', value: 5 },
+          { name: 'Top 10', value: 10 },
+          { name: 'Top 20', value: 20 },
+          { name: 'Top 50', value: 50 },
+          { name: 'All', value: 999 },
+        ],
+      })
+      const sortBy = await select({
+        message: 'Sort by?',
+        choices: [
+          { name: 'Size (largest first)', value: 'size' as const },
+          { name: 'Name (A-Z)', value: 'name' as const },
+          { name: 'Type (prod → dev → transitive)', value: 'type' as const },
+        ],
+      })
+      await analyze(projectPath, { top: count, sort: sortBy })
+    }
+
+    else if (action === 'type') {
+      const pkgType = await select({
+        message: 'Which type of dependencies?',
+        choices: [
+          { name: `${chalk.green(figures.circleFilled)} Production only`, value: 'prod' as const },
+          { name: `${chalk.blue(figures.circleFilled)} Development only`, value: 'dev' as const },
+          { name: `${chalk.gray(figures.circle)} Transitive only`, value: 'transitive' as const },
+          { name: `${chalk.white(figures.star)} All types`, value: 'all' as const },
+        ],
+      })
+      const count = await select({
+        message: 'How many to show?',
+        choices: [
+          { name: 'Top 10', value: 10 },
+          { name: 'Top 20', value: 20 },
+          { name: 'All', value: 999 },
+        ],
+      })
+      await analyze(projectPath, { type: pkgType, top: count })
+    }
+
+    else if (action === 'search') {
+      const keyword = await input({
+        message: 'Enter package name to search:',
+        validate: (val: string) => val.trim().length > 0 || 'Please enter a keyword',
+      })
+      await analyze(projectPath, { filter: keyword.trim(), top: 999 })
+    }
+
+    else if (action === 'duplicates') {
+      await analyze(projectPath, { duplicates: true })
+    }
+
+    else if (action === 'unused') {
+      await analyze(projectPath, { unused: true })
+    }
+
+    else if (action === 'tree') {
+      const treeDepth = await select({
+        message: 'Tree depth?',
+        choices: [
+          { name: '2 levels', value: 2 },
+          { name: '3 levels', value: 3 },
+          { name: '5 levels', value: 5 },
+        ],
+      })
+      const specificPkg = await input({
+        message: 'Specific package (leave empty for all):',
+      })
+      const treeOpt = specificPkg.trim() || true
+      await analyze(projectPath, { tree: treeOpt, depth: treeDepth })
+    }
+
+    // Prompt to continue
+    console.log()
+    const continueAction = await confirm({
+      message: 'Continue exploring?',
+      default: true,
+    })
+
+    if (!continueAction) {
+      console.log(chalk.gray('\n  Goodbye! 👋\n'))
+      break
+    }
+    console.log()
+  }
+}
+
+/**
  * Main analyze function
  */
 export async function analyze(projectPath: string = '.', options: AnalyzeOptions = {}) {
@@ -636,9 +831,26 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     tree = false,
     depth = 3,
     unused = false,
+    filter,
+    interactive = false,
     json = false
   } = options
+
   const resolvedPath = path.resolve(projectPath)
+
+  // Check node_modules exists first (before interactive mode)
+  const nodeModulesPath = path.join(resolvedPath, 'node_modules')
+  if (!fs.existsSync(nodeModulesPath)) {
+    console.log(chalk.red(`${figures.cross} node_modules not found at ${resolvedPath}`))
+    console.log(chalk.gray(`  Run ${chalk.cyan('npm install')} or ${chalk.cyan('pnpm install')} first.\n`))
+    return
+  }
+
+  // Handle interactive mode
+  if (interactive) {
+    await runInteractiveMode(projectPath)
+    return
+  }
 
   const spinner = ora({
     text: 'Scanning packages...',
@@ -833,6 +1045,19 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
   // Apply filters and sorting
   packages = filterPackages(packages, type)
+
+  // Apply keyword filter
+  if (filter) {
+    const keyword = filter.toLowerCase()
+    packages = packages.filter(p => p.name.toLowerCase().includes(keyword))
+
+    if (packages.length === 0) {
+      spinner.fail(`No packages found matching "${filter}"`)
+      console.log(chalk.gray(`\n  Try a different keyword or use ${chalk.cyan('--type all')} to search all packages.\n`))
+      return
+    }
+  }
+
   packages = sortPackages(packages, sort)
 
   const totalSize = packages.reduce((sum, pkg) => sum + pkg.size, 0)
@@ -850,7 +1075,11 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     transitive: packages.filter(p => p.type === 'transitive').reduce((s, p) => s + p.size, 0),
   }
 
-  spinner.succeed(`Found ${packages.length} packages${type !== 'all' ? ` (filtered: ${type})` : ''}`)
+  const filterInfo: string[] = []
+  if (type !== 'all') filterInfo.push(`type: ${type}`)
+  if (filter) filterInfo.push(`filter: "${filter}"`)
+
+  spinner.succeed(`Found ${packages.length} packages${filterInfo.length ? ` (${filterInfo.join(', ')})` : ''}`)
 
   if (json) {
     console.log(JSON.stringify({
@@ -862,9 +1091,7 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     return
   }
 
-  // Build filter/sort info
-  const filterInfo: string[] = []
-  if (type !== 'all') filterInfo.push(`type: ${type}`)
+  // Build subtitle info (reuse filterInfo from above, add sort info)
   if (sort !== 'size') filterInfo.push(`sort: ${sort}`)
   const subtitle = filterInfo.length > 0
     ? `${resolvedPath}  ${chalk.cyan(figures.arrowRight)}  ${filterInfo.join(', ')}`
