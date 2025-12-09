@@ -19,6 +19,8 @@ program
   .option('-f, --filter <keyword>', 'Filter packages by name')
   .option('-i, --interactive', 'Interactive mode with keyboard navigation')
   .option('--json', 'Output as JSON')
+  .option('-e, --export <file>', 'Export analysis to file (supports .json, .md)')
+  .option('-c, --copy', 'Copy analysis report to clipboard (markdown format)')
   .action(async (path: string, options: {
     top: string
     type: string
@@ -30,6 +32,8 @@ program
     filter?: string
     interactive: boolean
     json: boolean
+    export?: string
+    copy: boolean
   }) => {
     await analyze(path, {
       top: parseInt(options.top, 10),
@@ -42,6 +46,8 @@ program
       filter: options.filter,
       interactive: options.interactive,
       json: options.json,
+      exportFile: options.export,
+      copyToClipboard: options.copy,
     })
   })
 
