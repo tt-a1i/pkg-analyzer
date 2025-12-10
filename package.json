@@ -55,7 +55,7 @@
   },
   "homepage": "https://github.com/tt-a1i/pkg-analyzer#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

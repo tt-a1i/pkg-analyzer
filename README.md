@@ -240,7 +240,7 @@ await analyze('/path/to/project', {
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 20
 
 ## Contributing
 

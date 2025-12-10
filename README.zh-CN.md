@@ -195,7 +195,7 @@ pkg-analyzer --copy
 
 ## 系统要求
 
-- Node.js >= 18
+- Node.js >= 20
 
 ## 贡献
 
