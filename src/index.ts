@@ -36,6 +36,7 @@ interface AnalyzeOptions {
   outdated?: boolean
   security?: boolean
   compare?: string
+  why?: string
   filter?: string
   interactive?: boolean
   json?: boolean
@@ -255,28 +256,248 @@ async function copyToClipboard(text: string): Promise<boolean> {
 }
 
 /**
- * Get directory size recursively
+ * Get directory size recursively (async for parallel processing)
  */
-function getDirSize(dirPath: string): number {
+async function getDirSizeAsync(dirPath: string): Promise<number> {
   let size = 0
 
   try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
 
-    for (const entry of entries) {
+    const tasks = entries.map(async (entry) => {
       const fullPath = path.join(dirPath, entry.name)
 
       if (entry.isDirectory()) {
-        size += getDirSize(fullPath)
+        return getDirSizeAsync(fullPath)
       } else if (entry.isFile()) {
-        size += fs.statSync(fullPath).size
+        const stat = await fs.promises.stat(fullPath)
+        return stat.size
       }
-    }
+      return 0
+    })
+
+    const sizes = await Promise.all(tasks)
+    size = sizes.reduce((sum, s) => sum + s, 0)
   } catch {
     // Ignore permission errors
   }
 
   return size
+}
+
+/**
+ * Async version of getPackageInfo for parallel processing
+ */
+async function getPackageInfoAsync(
+  pkgPath: string,
+  name: string,
+  deps: ProjectDeps
+): Promise<PackageInfo | null> {
+  const pkgJsonPath = path.join(pkgPath, 'package.json')
+
+  try {
+    await fs.promises.access(pkgJsonPath)
+    const pkgJsonContent = await fs.promises.readFile(pkgJsonPath, 'utf-8')
+    const pkgJson = JSON.parse(pkgJsonContent)
+    const size = await getDirSizeAsync(pkgPath)
+
+    return {
+      name,
+      version: pkgJson.version || 'unknown',
+      size,
+      type: getPackageType(name, deps),
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Process items in parallel with concurrency limit
+ */
+async function parallelMap<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  concurrency: number
+): Promise<R[]> {
+  const results: R[] = []
+  let index = 0
+
+  async function worker(): Promise<void> {
+    while (index < items.length) {
+      const i = index++
+      results[i] = await fn(items[i])
+    }
+  }
+
+  const workers = Array(Math.min(concurrency, items.length))
+    .fill(null)
+    .map(() => worker())
+
+  await Promise.all(workers)
+  return results
+}
+
+/**
+ * Async parallel version of getPackagesFromNodeModules
+ */
+async function getPackagesFromNodeModulesAsync(
+  projectPath: string,
+  deps: ProjectDeps,
+  spinner: ReturnType<typeof ora>
+): Promise<PackageInfo[]> {
+  const nodeModulesPath = path.join(projectPath, 'node_modules')
+
+  if (!fs.existsSync(nodeModulesPath)) {
+    spinner.fail('node_modules not found. Run npm/yarn/pnpm install first.')
+    process.exit(1)
+  }
+
+  const packageManager = detectPackageManager(projectPath)
+  spinner.text = `Scanning packages (${packageManager}, parallel)...`
+  const startTime = Date.now()
+
+  const progressBar = (current: number, total: number, width: number = 20): string => {
+    const percent = Math.round((current / total) * 100)
+    const filled = Math.round((current / total) * width)
+    const empty = width - filled
+    return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${percent}%`
+  }
+
+  const elapsed = (): string => {
+    const seconds = ((Date.now() - startTime) / 1000).toFixed(1)
+    return `${seconds}s`
+  }
+
+  // Collect all package paths first (fast sync operation)
+  interface PackageEntry {
+    pkgPath: string
+    name: string
+  }
+
+  const packageEntries: PackageEntry[] = []
+
+  if (packageManager === 'pnpm') {
+    const pnpmPath = path.join(nodeModulesPath, '.pnpm')
+    if (!fs.existsSync(pnpmPath)) {
+      spinner.fail('pnpm structure not found.')
+      process.exit(1)
+    }
+
+    const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+
+      const dirName = entry.name
+      let name: string
+      let atIndex: number
+
+      if (dirName.startsWith('@')) {
+        const plusIndex = dirName.indexOf('+')
+        if (plusIndex === -1) continue
+
+        atIndex = dirName.indexOf('@', plusIndex)
+        if (atIndex === -1) continue
+
+        const scope = dirName.substring(0, plusIndex)
+        const pkgName = dirName.substring(plusIndex + 1, atIndex)
+        name = `${scope}/${pkgName}`
+      } else {
+        atIndex = dirName.lastIndexOf('@')
+        if (atIndex <= 0) continue
+
+        name = dirName.substring(0, atIndex)
+      }
+
+      const pkgPath = path.join(pnpmPath, dirName, 'node_modules', name)
+      if (fs.existsSync(pkgPath)) {
+        packageEntries.push({ pkgPath, name })
+      }
+    }
+  } else {
+    // npm and yarn - collect all packages recursively
+    const seen = new Set<string>()
+
+    function collectPackages(nmPath: string, depth: number = 0) {
+      if (!fs.existsSync(nmPath) || depth > 10) return
+
+      const entries = fs.readdirSync(nmPath, { withFileTypes: true })
+
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+
+        const pkgPath = path.join(nmPath, entry.name)
+
+        if (entry.name.startsWith('@')) {
+          const scopedEntries = fs.readdirSync(pkgPath, { withFileTypes: true })
+
+          for (const scopedEntry of scopedEntries) {
+            if (!scopedEntry.isDirectory()) continue
+
+            const scopedPkgPath = path.join(pkgPath, scopedEntry.name)
+            const name = `${entry.name}/${scopedEntry.name}`
+
+            // Check for package.json to get version for deduplication
+            const pkgJsonPath = path.join(scopedPkgPath, 'package.json')
+            if (fs.existsSync(pkgJsonPath)) {
+              try {
+                const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+                const key = `${name}@${pkgJson.version || 'unknown'}`
+                if (!seen.has(key)) {
+                  seen.add(key)
+                  packageEntries.push({ pkgPath: scopedPkgPath, name })
+                }
+              } catch {
+                // Skip on error
+              }
+            }
+
+            const nestedNm = path.join(scopedPkgPath, 'node_modules')
+            collectPackages(nestedNm, depth + 1)
+          }
+        } else {
+          const pkgJsonPath = path.join(pkgPath, 'package.json')
+          if (fs.existsSync(pkgJsonPath)) {
+            try {
+              const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+              const key = `${entry.name}@${pkgJson.version || 'unknown'}`
+              if (!seen.has(key)) {
+                seen.add(key)
+                packageEntries.push({ pkgPath, name: entry.name })
+              }
+            } catch {
+              // Skip on error
+            }
+          }
+
+          const nestedNm = path.join(pkgPath, 'node_modules')
+          collectPackages(nestedNm, depth + 1)
+        }
+      }
+    }
+
+    collectPackages(nodeModulesPath)
+  }
+
+  spinner.text = `Processing ${packageEntries.length} packages in parallel...`
+
+  // Process packages in parallel (size calculation is the slow part)
+  const concurrency = 10 // Process 10 packages concurrently
+  let processed = 0
+
+  const results = await parallelMap(
+    packageEntries,
+    async (entry) => {
+      const info = await getPackageInfoAsync(entry.pkgPath, entry.name, deps)
+      processed++
+      spinner.text = `Processing packages ${progressBar(processed, packageEntries.length)} ${elapsed()}`
+      return info
+    },
+    concurrency
+  )
+
+  return results.filter((info): info is PackageInfo => info !== null)
 }
 
 /**
@@ -430,172 +651,6 @@ function detectPackageManager(projectPath: string): PackageManager {
   if (fs.existsSync(path.join(nodeModulesPath, '.yarn-integrity'))) return 'yarn'
 
   return 'npm' // default
-}
-
-/**
- * Get all packages from node_modules (supports pnpm, yarn, npm)
- */
-function getPackagesFromNodeModules(
-  projectPath: string,
-  deps: ProjectDeps,
-  spinner: ReturnType<typeof ora>
-): PackageInfo[] {
-  const nodeModulesPath = path.join(projectPath, 'node_modules')
-
-  if (!fs.existsSync(nodeModulesPath)) {
-    spinner.fail('node_modules not found. Run npm/yarn/pnpm install first.')
-    process.exit(1)
-  }
-
-  const packageManager = detectPackageManager(projectPath)
-  spinner.text = `Scanning packages (${packageManager})...`
-  const startTime = Date.now()
-
-  const packages: PackageInfo[] = []
-
-  // Progress bar characters
-  const progressBar = (current: number, total: number, width: number = 20): string => {
-    const percent = Math.round((current / total) * 100)
-    const filled = Math.round((current / total) * width)
-    const empty = width - filled
-    return `[${'█'.repeat(filled)}${'░'.repeat(empty)}] ${percent}%`
-  }
-
-  const elapsed = (): string => {
-    const seconds = ((Date.now() - startTime) / 1000).toFixed(1)
-    return `${seconds}s`
-  }
-
-  if (packageManager === 'pnpm') {
-    // pnpm stores packages in .pnpm directory
-    const pnpmPath = path.join(nodeModulesPath, '.pnpm')
-    if (!fs.existsSync(pnpmPath)) {
-      spinner.fail('pnpm structure not found.')
-      process.exit(1)
-    }
-
-    const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
-    const total = entries.filter((e) => e.isDirectory()).length
-    let processed = 0
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-
-      processed++
-      spinner.text = `Scanning packages (pnpm) ${progressBar(processed, total)} ${processed}/${total}`
-
-      const dirName = entry.name
-      let name: string
-      let atIndex: number
-
-      if (dirName.startsWith('@')) {
-        const plusIndex = dirName.indexOf('+')
-        if (plusIndex === -1) continue
-
-        atIndex = dirName.indexOf('@', plusIndex)
-        if (atIndex === -1) continue
-
-        const scope = dirName.substring(0, plusIndex)
-        const pkgName = dirName.substring(plusIndex + 1, atIndex)
-        name = `${scope}/${pkgName}`
-      } else {
-        atIndex = dirName.lastIndexOf('@')
-        if (atIndex <= 0) continue
-
-        name = dirName.substring(0, atIndex)
-      }
-
-      const pkgPath = path.join(pnpmPath, dirName, 'node_modules', name)
-
-      if (fs.existsSync(pkgPath)) {
-        const info = getPackageInfo(pkgPath, name, deps)
-        if (info) packages.push(info)
-      }
-    }
-  } else {
-    // npm and yarn use flat/nested node_modules structure
-    // We need to scan recursively to find all packages including nested ones
-    const seen = new Map<string, PackageInfo>() // key: name@version
-
-    function scanNodeModules(nmPath: string, depth: number = 0) {
-      if (!fs.existsSync(nmPath) || depth > 10) return
-
-      const entries = fs.readdirSync(nmPath, { withFileTypes: true })
-
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith('.')) continue
-
-        const pkgPath = path.join(nmPath, entry.name)
-
-        if (entry.name.startsWith('@')) {
-          // Scoped package directory
-          const scopedEntries = fs.readdirSync(pkgPath, { withFileTypes: true })
-
-          for (const scopedEntry of scopedEntries) {
-            if (!scopedEntry.isDirectory()) continue
-
-            const scopedPkgPath = path.join(pkgPath, scopedEntry.name)
-            const name = `${entry.name}/${scopedEntry.name}`
-            const info = getPackageInfo(scopedPkgPath, name, deps)
-
-            if (info) {
-              const key = `${info.name}@${info.version}`
-              if (!seen.has(key)) {
-                seen.set(key, info)
-                spinner.text = `Scanning packages (${packageManager})... ${seen.size} found (${elapsed()})`
-              }
-            }
-
-            // Check for nested node_modules
-            const nestedNm = path.join(scopedPkgPath, 'node_modules')
-            scanNodeModules(nestedNm, depth + 1)
-          }
-        } else {
-          const info = getPackageInfo(pkgPath, entry.name, deps)
-
-          if (info) {
-            const key = `${info.name}@${info.version}`
-            if (!seen.has(key)) {
-              seen.set(key, info)
-              spinner.text = `Scanning packages (${packageManager})... ${seen.size} found (${elapsed()})`
-            }
-          }
-
-          // Check for nested node_modules
-          const nestedNm = path.join(pkgPath, 'node_modules')
-          scanNodeModules(nestedNm, depth + 1)
-        }
-      }
-    }
-
-    scanNodeModules(nodeModulesPath)
-    packages.push(...seen.values())
-  }
-
-  return packages
-}
-
-/**
- * Get package info
- */
-function getPackageInfo(pkgPath: string, name: string, deps: ProjectDeps): PackageInfo | null {
-  const pkgJsonPath = path.join(pkgPath, 'package.json')
-
-  if (!fs.existsSync(pkgJsonPath)) return null
-
-  try {
-    const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
-    const size = getDirSize(pkgPath)
-
-    return {
-      name,
-      version: pkgJson.version || 'unknown',
-      size,
-      type: getPackageType(name, deps),
-    }
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -1104,6 +1159,146 @@ function compareDependencies(packages1: PackageInfo[], packages2: PackageInfo[])
   }
 }
 
+interface WhyResult {
+  package: string
+  version: string
+  isDirect: boolean
+  directType?: 'prod' | 'dev' | 'peer' | 'optional'
+  dependents: Array<{
+    name: string
+    version: string
+    requiredVersion: string
+  }>
+}
+
+/**
+ * Find why a package is installed (reverse dependency lookup)
+ */
+function findWhyInstalled(
+  projectPath: string,
+  packageName: string,
+  packages: PackageInfo[],
+  projectDeps: ProjectDeps
+): WhyResult | null {
+  // Find the package
+  const pkg = packages.find((p) => p.name === packageName)
+  if (!pkg) return null
+
+  // Check if it's a direct dependency
+  const isDirect =
+    projectDeps.prod.has(packageName) ||
+    projectDeps.dev.has(packageName) ||
+    projectDeps.peer.has(packageName) ||
+    projectDeps.optional.has(packageName)
+
+  let directType: 'prod' | 'dev' | 'peer' | 'optional' | undefined
+  if (projectDeps.prod.has(packageName)) directType = 'prod'
+  else if (projectDeps.dev.has(packageName)) directType = 'dev'
+  else if (projectDeps.peer.has(packageName)) directType = 'peer'
+  else if (projectDeps.optional.has(packageName)) directType = 'optional'
+
+  // Find all packages that depend on this package
+  const dependents: WhyResult['dependents'] = []
+  const nodeModulesPath = path.join(projectPath, 'node_modules')
+  const packageManager = detectPackageManager(projectPath)
+
+  if (packageManager === 'pnpm') {
+    // For pnpm, scan the .pnpm directory
+    const pnpmPath = path.join(nodeModulesPath, '.pnpm')
+    if (fs.existsSync(pnpmPath)) {
+      const entries = fs.readdirSync(pnpmPath, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+
+        // Parse package name from directory
+        const dirName = entry.name
+        let name: string
+        let atIndex: number
+
+        if (dirName.startsWith('@')) {
+          const plusIndex = dirName.indexOf('+')
+          if (plusIndex === -1) continue
+          atIndex = dirName.indexOf('@', plusIndex)
+          if (atIndex === -1) continue
+          const scope = dirName.substring(0, plusIndex)
+          const pkgName = dirName.substring(plusIndex + 1, atIndex)
+          name = `${scope}/${pkgName}`
+        } else {
+          atIndex = dirName.lastIndexOf('@')
+          if (atIndex <= 0) continue
+          name = dirName.substring(0, atIndex)
+        }
+
+        if (name === packageName) continue // Skip self
+
+        const pkgPath = path.join(pnpmPath, dirName, 'node_modules', name)
+        const pkgJsonPath = path.join(pkgPath, 'package.json')
+
+        if (fs.existsSync(pkgJsonPath)) {
+          try {
+            const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+            const allDeps = {
+              ...pkgJson.dependencies,
+              ...pkgJson.peerDependencies,
+              ...pkgJson.optionalDependencies,
+            }
+
+            if (allDeps && allDeps[packageName]) {
+              dependents.push({
+                name,
+                version: pkgJson.version || 'unknown',
+                requiredVersion: allDeps[packageName],
+              })
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+  } else {
+    // For npm/yarn, scan all packages in node_modules
+    for (const p of packages) {
+      if (p.name === packageName) continue
+
+      const pkgJsonPath = path.join(
+        nodeModulesPath,
+        p.name.replace('/', '/node_modules/'),
+        'package.json'
+      )
+
+      if (fs.existsSync(pkgJsonPath)) {
+        try {
+          const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
+          const allDeps = {
+            ...pkgJson.dependencies,
+            ...pkgJson.peerDependencies,
+            ...pkgJson.optionalDependencies,
+          }
+
+          if (allDeps && allDeps[packageName]) {
+            dependents.push({
+              name: p.name,
+              version: p.version,
+              requiredVersion: allDeps[packageName],
+            })
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+  }
+
+  return {
+    package: packageName,
+    version: pkg.version,
+    isDirect,
+    directType,
+    dependents: dependents.sort((a, b) => a.name.localeCompare(b.name)),
+  }
+}
+
 /**
  * Interactive mode menu
  */
@@ -1250,6 +1445,7 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     outdated = false,
     security = false,
     compare,
+    why,
     filter,
     interactive = false,
     json = false,
@@ -1488,9 +1684,13 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
 
     const deps1 = getProjectDeps(resolvedPath)
     const deps2 = getProjectDeps(comparePath)
-    const packages1 = getPackagesFromNodeModules(resolvedPath, deps1, spinner)
-    spinner.text = 'Scanning second project...'
-    const packages2 = getPackagesFromNodeModules(comparePath, deps2, spinner)
+
+    // Scan both projects in parallel
+    spinner.text = 'Scanning both projects in parallel...'
+    const [packages1, packages2] = await Promise.all([
+      getPackagesFromNodeModulesAsync(resolvedPath, deps1, spinner),
+      getPackagesFromNodeModulesAsync(comparePath, deps2, spinner),
+    ])
 
     const result = compareDependencies(packages1, packages2)
     spinner.succeed(`Compared ${packages1.length} vs ${packages2.length} packages`)
@@ -1556,13 +1756,143 @@ export async function analyze(projectPath: string = '.', options: AnalyzeOptions
     return
   }
 
+  // Handle why mode
+  if (why) {
+    const spinner = ora({ text: `Finding why ${why} is installed...`, spinner: 'dots' }).start()
+
+    const deps = getProjectDeps(resolvedPath)
+    const packages = await getPackagesFromNodeModulesAsync(resolvedPath, deps, spinner)
+    const result = findWhyInstalled(resolvedPath, why, packages, deps)
+
+    if (!result) {
+      spinner.fail(`Package "${why}" not found in node_modules`)
+      return
+    }
+
+    spinner.succeed(`Found ${why}@${result.version}`)
+
+    if (json) {
+      console.log(JSON.stringify({ why: result }, null, 2))
+      return
+    }
+
+    printHeader('WHY IS THIS PACKAGE INSTALLED?', resolvedPath)
+
+    // Package info
+    console.log('')
+    console.log(`  ${chalk.cyan.bold('Package:')} ${chalk.yellow.bold(result.package)}`)
+    console.log(`  ${chalk.cyan.bold('Version:')} ${chalk.gray(result.version)}`)
+
+    if (result.isDirect) {
+      const typeColor =
+        result.directType === 'prod'
+          ? chalk.green
+          : result.directType === 'dev'
+            ? chalk.blue
+            : chalk.magenta
+      console.log(
+        `  ${chalk.cyan.bold('Status:')} ${typeColor.bold('Direct dependency')} (${result.directType})`
+      )
+    } else {
+      console.log(`  ${chalk.cyan.bold('Status:')} ${chalk.gray('Transitive dependency')}`)
+    }
+
+    console.log('')
+
+    if (result.dependents.length === 0) {
+      if (result.isDirect) {
+        console.log(
+          chalk.green(
+            `  ${figures.tick} This is a direct dependency in your package.json (no other packages depend on it)`
+          )
+        )
+      } else {
+        console.log(chalk.gray(`  ${figures.info} No dependents found`))
+      }
+    } else {
+      console.log(chalk.cyan.bold(`  Required by ${result.dependents.length} packages:`))
+      console.log('')
+
+      const table = new Table({
+        head: [chalk.cyan('Package'), chalk.cyan('Version'), chalk.cyan('Requires')],
+        chars: {
+          top: '─',
+          'top-mid': '┬',
+          'top-left': '┌',
+          'top-right': '┐',
+          bottom: '─',
+          'bottom-mid': '┴',
+          'bottom-left': '└',
+          'bottom-right': '┘',
+          left: '│',
+          'left-mid': '├',
+          mid: '─',
+          'mid-mid': '┼',
+          right: '│',
+          'right-mid': '┤',
+          middle: '│',
+        },
+        style: { 'padding-left': 1, 'padding-right': 1 },
+        colWidths: [35, 15, 20],
+      })
+
+      for (const dep of result.dependents.slice(0, 20)) {
+        table.push([
+          chalk.yellow(dep.name),
+          chalk.gray(dep.version),
+          chalk.cyan(dep.requiredVersion),
+        ])
+      }
+
+      console.log(table.toString())
+
+      if (result.dependents.length > 20) {
+        console.log(chalk.gray(`  ... and ${result.dependents.length - 20} more packages`))
+      }
+    }
+
+    // Summary box
+    const summaryLines: string[] = []
+    if (result.isDirect) {
+      summaryLines.push(`${figures.info} ${chalk.bold('Direct dependency')}`)
+      summaryLines.push('')
+      summaryLines.push(`  Declared in: ${chalk.cyan('package.json')}`)
+      summaryLines.push(`  Type: ${chalk.yellow(result.directType || 'unknown')}`)
+      if (result.dependents.length > 0) {
+        summaryLines.push('')
+        summaryLines.push(
+          `  ${chalk.gray(`Also required by ${result.dependents.length} other package(s)`)}`
+        )
+      }
+    } else {
+      summaryLines.push(`${figures.info} ${chalk.bold('Transitive dependency')}`)
+      summaryLines.push('')
+      summaryLines.push(
+        `  Required by ${chalk.yellow(result.dependents.length.toString())} package(s)`
+      )
+      summaryLines.push('')
+      summaryLines.push(chalk.gray(`  This package is not in your package.json,`))
+      summaryLines.push(chalk.gray(`  it was installed as a dependency of other packages.`))
+    }
+
+    console.log(
+      boxen(summaryLines.join('\n'), {
+        padding: 1,
+        margin: { top: 1, bottom: 1, left: 2, right: 2 },
+        borderStyle: 'round',
+        borderColor: result.isDirect ? 'green' : 'yellow',
+      })
+    )
+    return
+  }
+
   const spinner = ora({
     text: 'Scanning packages...',
     spinner: 'dots',
   }).start()
 
   const deps = getProjectDeps(resolvedPath)
-  let packages = getPackagesFromNodeModules(resolvedPath, deps, spinner)
+  let packages = await getPackagesFromNodeModulesAsync(resolvedPath, deps, spinner)
 
   if (packages.length === 0) {
     spinner.warn('No packages found.')

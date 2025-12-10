@@ -1,6 +1,6 @@
 {
   "name": "@tt-a1i/pkg-analyzer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Analyze node_modules dependencies - visualize sizes, find duplicates, detect unused packages, export reports for AI optimization",
   "type": "module",
   "bin": {
@@ -62,6 +62,7 @@
     "@types/node": "^20.10.0",
     "@typescript-eslint/eslint-plugin": "^8.49.0",
     "@typescript-eslint/parser": "^8.49.0",
+    "@vitest/coverage-v8": "^4.0.15",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2024-12-10
+
+### Added
+- `--why <package>` option to show why a package is installed (reverse dependency lookup)
+- Test coverage reporting with Codecov integration
+- Coverage badge in README
+
+### Changed
+- Performance optimization: parallel package scanning with async I/O
+- Improved scanning speed with concurrent size calculation (10x parallelism)
+- Better progress feedback during parallel processing
+
 ## [0.3.0] - 2024-12-10
 
 ### Added
@@ -45,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for npm, yarn, and pnpm package managers
 - Cross-platform support (macOS, Linux, Windows)
 
+[0.4.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.4.0
 [0.3.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.3.0
 [0.2.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.2.0
 [0.1.0]: https://github.com/tt-a1i/pkg-analyzer/releases/tag/v0.1.0

@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@tt-a1i/pkg-analyzer.svg)](https://www.npmjs.com/package/@tt-a1i/pkg-analyzer)
 [![CI](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tt-a1i/pkg-analyzer/graph/badge.svg)](https://codecov.io/gh/tt-a1i/pkg-analyzer)
 [![Node.js](https://img.shields.io/node/v/@tt-a1i/pkg-analyzer.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -70,6 +71,7 @@ pkg-analyzer [路径] [选项]
 | `--outdated` | `-o` | 显示过期的依赖 |
 | `--security` | | 运行安全审计 |
 | `--compare <路径>` | | 与另一个项目对比 |
+| `--why <包名>` | | 显示为什么安装了某个包 |
 | `--tree [包名]` | | 显示依赖树 |
 | `--depth <n>` | | 树视图最大深度（默认：3） |
 | `--filter <关键词>` | `-f` | 按名称过滤包 |
@@ -117,6 +119,16 @@ pkg-analyzer --security
 
 # 与另一个项目对比
 pkg-analyzer --compare ../other-project
+```
+
+### 包安装原因
+
+```bash
+# 查找为什么安装了某个包
+pkg-analyzer --why lodash
+
+# 检查包是直接依赖还是传递依赖
+pkg-analyzer --why ansi-styles
 ```
 
 ### 依赖树

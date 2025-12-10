@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@tt-a1i/pkg-analyzer.svg)](https://www.npmjs.com/package/@tt-a1i/pkg-analyzer)
 [![CI](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/tt-a1i/pkg-analyzer/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tt-a1i/pkg-analyzer/graph/badge.svg)](https://codecov.io/gh/tt-a1i/pkg-analyzer)
 [![Node.js](https://img.shields.io/node/v/@tt-a1i/pkg-analyzer.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -67,6 +68,7 @@ pkg-analyzer [path] [options]
 | `--outdated` | `-o` | Show outdated dependencies |
 | `--security` | | Run security audit |
 | `--compare <path>` | | Compare with another project |
+| `--why <pkg>` | | Show why a package is installed |
 | `--tree [pkg]` | | Show dependency tree |
 | `--depth <n>` | | Max depth for tree view (default: 3) |
 | `--filter <keyword>` | `-f` | Filter packages by name |
@@ -114,6 +116,16 @@ pkg-analyzer --security
 
 # Compare with another project
 pkg-analyzer --compare ../other-project
+```
+
+### Why Is This Package Installed?
+
+```bash
+# Find why a package is installed
+pkg-analyzer --why lodash
+
+# Check if a package is direct or transitive
+pkg-analyzer --why ansi-styles
 ```
 
 ### Dependency Tree

@@ -7,7 +7,7 @@ const program = new Command()
 program
   .name('pkg-analyzer')
   .description('Analyze node_modules dependencies size')
-  .version('0.2.0')
+  .version('0.4.0')
   .argument('[path]', 'Project path to analyze', '.')
   .option('-n, --top <number>', 'Show top N largest packages', '10')
   .option('-t, --type <type>', 'Filter by type: prod, dev, transitive, all', 'all')
@@ -19,6 +19,7 @@ program
   .option('-o, --outdated', 'Show outdated dependencies')
   .option('--security', 'Run security audit (npm audit)')
   .option('--compare <path>', 'Compare dependencies with another project')
+  .option('--why <package>', 'Show why a package is installed (reverse dependencies)')
   .option('-f, --filter <keyword>', 'Filter packages by name')
   .option('-i, --interactive', 'Interactive mode with keyboard navigation')
   .option('--json', 'Output as JSON')
@@ -38,6 +39,7 @@ program
         outdated: boolean
         security: boolean
         compare?: string
+        why?: string
         filter?: string
         interactive: boolean
         json: boolean
@@ -56,6 +58,7 @@ program
         outdated: options.outdated,
         security: options.security,
         compare: options.compare,
+        why: options.why,
         filter: options.filter,
         interactive: options.interactive,
         json: options.json,
